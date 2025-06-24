@@ -1,0 +1,46 @@
+# Main options
+outdir: "exps"  # Where to save the results
+data: "__required__"  # Path to the dataset
+resolution: null  # Resolution of the dataset after downsampling
+cond: false  # Train class-conditional model
+arch: "ddpmpp-uno"  # Network architecture (options: ddpmpp, ncsnpp, adm, ddpmpp-uno)
+precond: "edm"  # Preconditioning & loss function (options: vp, ve, edm)
+
+# Hyperparameters
+duration: 200  # Training duration in millions of images
+batch: 512  # Total batch size
+batch_gpu: null  # Limit batch size per GPU (optional)
+nn_resolution: null  # Resolution of the network, defaults to resolution
+cbase: null  # Channel multiplier (optional, varies by default)
+cres: null  # Channels per resolution (optional, varies by default)
+lr: 1.0e-3  # Learning rate
+ema: 0.5  # EMA half-life in millions of images
+dropout: 0.13  # Dropout probability
+augment: 0.12  # Augment probability
+xflip: false  # Enable dataset x-flips
+
+# Neural Operator-related
+attn_resolutions: [16]  # Resolutions to apply attention
+num_blocks: 4  # Number of blocks in the network
+fmult: 1.0  # Feature multiplier
+rank: 1.0  # Rank of the operator
+rbf_scale: 0.05  # RBF scale
+
+# Performance-related
+fp16: false  # Enable mixed-precision training
+ls: 1  # Loss scaling
+bench: true  # Enable cuDNN benchmarking
+cache: true  # Cache dataset in CPU memory
+workers: 1  # DataLoader worker processes
+
+# I/O-related
+tick: 50  # How often to print progress (in thousands of images)
+snap: 50  # How often to save snapshots (in ticks)
+dump: 500  # How often to dump state (in ticks)
+seed: null  # Random seed (optional, random if not specified)
+resume: null  # Resume from previous training state (path to training-state-*.pt file)
+dry_run: false  # Print training options and exit without training
+
+# Wandb configuration
+wandb: "online"  # Weights & Biases mode (options: online, offline, disabled)
+name: "__required__"  # Wandb run name

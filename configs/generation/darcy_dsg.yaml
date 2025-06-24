@@ -1,0 +1,43 @@
+outdir: 'exps'
+name: ''
+
+# Dataset options
+dataset: 'darcy'
+data_path: 'data/DiffPDE/darcy_test_hf'
+data_offset: null
+resolution: 128  # downsampled resolution, defaults to dataset resolution
+max_size: null  # maximum number of samples to use, defaults to one epoch
+batch_size: 32
+
+# Model options
+pkl_path: '__required__'
+rbf_scale: 0.05
+
+# Generation options
+seed: null
+init_latents: "rbf"  # rbf or white_noise
+iterations: 200
+sigma_min: 0.002
+sigma_max: 80
+rho: 7
+
+# Loss options
+observation: 
+  - type: "sparse"
+    loss_type: "mse"  # mse, l1, l2, or huber
+    known_indices: [500, 500]
+    normalize: true
+  - type: "pde"
+    loss_type: "huber"
+    derivative_method: "finite_diff"
+
+# Guidance options
+guidance:
+  type: "dsg"
+  threshold: 0.99
+  weights: [20000, 0, 0]
+
+# I/O-related
+n_plots: 4  # number of samples to plot
+n_process_steps: 10  # number of steps to plot process
+wandb: "offline"
