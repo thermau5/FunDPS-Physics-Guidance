@@ -8,7 +8,7 @@ data_path: 'data/DiffPDE/darcy_test_hf'
 data_offset: null
 resolution: 128  # downsampled resolution, defaults to dataset resolution
 max_size: null  # maximum number of samples to use, defaults to one epoch
-batch_size: 8
+batch_size: 32
 
 # Model options
 pkl_path: '__required__'

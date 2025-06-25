@@ -200,7 +200,12 @@ class FNOObservation(Observation):
             raise ValueError(f"unknown task '{task}'; expected 'forward' or 'inverse'")
         model_path = f"generation/fno_trained_{task}_{dataset_name}.pth"
 
-        state_dict = torch.load(model_path, map_location="cpu", weights_only=False)
+        try:
+            state_dict = torch.load(model_path, map_location="cpu", weights_only=False)
+        except TypeError:
+            # For older torch versions that do not support weights_only
+            state_dict = torch.load(model_path, map_location="cpu")
+
         self.fno.load_state_dict(state_dict)
 
         # (3) freeze the operator
