@@ -17,7 +17,7 @@ rbf_scale: 0.05
 # Generation options
 seed: null
 init_latents: "rbf"  # rbf or white_noise
-iterations: 200
+iterations: 500
 sigma_min: 0.002
 sigma_max: 80
 rho: 7
@@ -31,11 +31,14 @@ observation:
   - type: "pde"
     loss_type: "huber"
     derivative_method: "finite_diff"
+  - type: "fno"
+    loss_type: "mse"
+    normalize: true
 
 # Guidance options
 guidance:
   type: "dps"
-  weights: [10000, 0, 0]
+  weights: [10000, 0, 0, 0]
 
 # I/O-related
 n_plots: 4  # number of samples to plot

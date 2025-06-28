@@ -31,11 +31,14 @@ observation:
   - type: "pde"
     loss_type: "huber"
     derivative_method: "finite_diff"
+  - type: "fno"
+    loss_type: "mse"
+    normalize: true
 
 # Guidance options
 guidance:
   type: "dps"
-  weights: [0, 20000, 10]
+  weights: [0, 20000, 0, 0]
 
 # I/O-related
 n_plots: 4  # number of samples to plot
