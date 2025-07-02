@@ -66,7 +66,20 @@ class PDEDataset(Dataset):
             self._metadata["__version__"] = "1.0"
         print("Dataset version:", self._metadata["__version__"])
 
-        self._channel = channel
+        # Determine which channels to use:
+        # - None: use all channels (default if not specified in config)
+        # - int: use the specified single channel
+        # - list: use the specified list of channels
+        if channel is None:
+            self._channel = None
+        elif isinstance(channel, int):
+            self._channel = [channel]
+        else:
+            self._channel = list(channel)
+
+        if self._channel is not None:
+            # Update channel dimension in _raw_shape to reflect selected channels
+            self._raw_shape[1] = len(self._channel)
 
     def __len__(self):
         return len(self._dataset)
@@ -80,9 +93,7 @@ class PDEDataset(Dataset):
             image = image[..., :: self._downsample, :: self._downsample]
 
         if self._channel is not None:
-            image = image[self._channel]
-            # Use np.expand_dims to add the channel dimension back
-            image = np.expand_dims(image, axis=0)
+            image = image[self._channel, ...] # filter out the channels that are not in self._channel
 
         # Return image and dummy label (for compatibility)
         return image, np.zeros(0)

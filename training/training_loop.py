@@ -69,6 +69,7 @@ def training_loop(
     # Load dataset.
     dist.print0("Loading dataset...")
     dataset_obj = dnnlib.util.construct_class_by_name(**dataset_kwargs)  # subclass of training.dataset.Dataset
+    dist.print0(f"Dataset reports num_channels: {dataset_obj.num_channels}")
     dataset_sampler = misc.InfiniteSampler(dataset=dataset_obj, rank=dist.get_rank(), num_replicas=dist.get_world_size(), seed=seed)
     dataset_iterator = iter(torch.utils.data.DataLoader(dataset=dataset_obj, sampler=dataset_sampler, batch_size=batch_gpu, **data_loader_kwargs))
 
@@ -78,6 +79,12 @@ def training_loop(
     net = dnnlib.util.construct_class_by_name(**network_kwargs, **interface_kwargs)  # subclass of torch.nn.Module
     net.train().requires_grad_(True).to(device)
     dist.print0("Number of params: {}".format(misc.count_parameters(net)))
+    dist.print0(f"Model input channels (img_channels): {net.img_channels}")
+    # Check if the model input and output channels match
+    if hasattr(net, 'out_channels'):
+        dist.print0(f"Model output channels (out_channels): {net.out_channels}")
+        if net.img_channels != net.out_channels:
+            dist.print0("WARNING: Model input and output channels do not match!")
     if dist.get_rank() == 0:
         with torch.no_grad():
             images = torch.zeros([batch_gpu, net.img_channels, net.img_resolution, net.img_resolution], device=device)
