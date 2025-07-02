@@ -231,7 +231,7 @@ for epoch in range(num_epochs):
 
 torch.save(model.state_dict(), f"generation/fno_trained_{pde_direction}_{dataset_name}.pth")
 
-# %%
+#%%
 # ============================================================
 # 5. EVALUATION ON TEST DATA
 # ============================================================
@@ -266,3 +266,54 @@ for i in range(1):  # Visualize first sample from the testing dataset with predi
         ground_truth_field = data[0:1, :, :]  # Second channel as ground_truth
     visualize_sample_or_pred(input_field, ground_truth_field, model=model, device=device, visualize_pred=True)
 
+#%%
+# ============================================================
+# 6. TESTING THE SAVED MODEL
+# ============================================================
+
+pde_direction = 'inverse'  # or 'inverse', depending on the dataset
+dataset_name = 'darcy'  # Name of the dataset for saving/loading models
+
+# Instantiate a new model with the same architecture
+loaded_model = FNO(
+    n_modes=(64, 64),
+    in_channels=1,      # scalar input
+    out_channels=1,     # scalar output
+    hidden_channels=64,
+    n_layers=4
+).to(device)
+
+# Load the saved weights
+saved_model_path = f"generation/fno_trained_{pde_direction}_{dataset_name}.pth"
+loaded_model.load_state_dict(torch.load(saved_model_path, map_location=device))
+loaded_model.eval()
+
+# Evaluate loaded model on test set
+loaded_test_loss = 0.0
+with torch.no_grad():
+    for test_data, _ in test_loader:
+        test_data = test_data.to(device).float()
+        if pde_direction == 'forward':
+            inputs, ground_truths = test_data[:, 0:1, :, :], test_data[:, 1:2, :, :]
+        elif pde_direction == 'inverse':
+            inputs, ground_truths = test_data[:, 1:2, :, :], test_data[:, 0:1, :, :]
+        outputs = loaded_model(inputs)
+        loss = criterion(outputs, ground_truths)
+        loaded_test_loss += loss.item()
+loaded_test_loss /= len(test_dataset)
+print(f"[Loaded Model] Test Loss: {loaded_test_loss:.6f}")
+
+# Visualize predictions from the loaded model
+print("Visualizing predictions from loaded model:")
+for i in range(1):  # Visualize first sample from the testing dataset with predictions
+    data, _ = test_dataset[i]
+    if pde_direction == 'forward':
+        input_field = data[0:1, :, :]
+        ground_truth_field = data[1:2, :, :]
+    elif pde_direction == 'inverse':
+        input_field = data[1:2, :, :]
+        ground_truth_field = data[0:1, :, :]
+    visualize_sample_or_pred(input_field, ground_truth_field, model=loaded_model, device=device, visualize_pred=True)
+
+
+# %%

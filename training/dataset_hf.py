@@ -18,6 +18,7 @@ class PDEDataset(Dataset):
         use_labels=False,  # Enable conditioning labels? False = label dimension is zero.
         xflip=False,  # Augment with horizontal flips.
         cache=False,  # Cache images in CPU memory? int = cache up to N bytes.
+        channel=None,  # Channel to use for the dataset.
     ):
         assert use_labels is False, "Labels are not supported"
         assert xflip is False, "Horizontal flips are not supported"
@@ -65,6 +66,8 @@ class PDEDataset(Dataset):
             self._metadata["__version__"] = "1.0"
         print("Dataset version:", self._metadata["__version__"])
 
+        self._channel = channel
+
     def __len__(self):
         return len(self._dataset)
 
@@ -75,6 +78,11 @@ class PDEDataset(Dataset):
         # Handle downsampling if needed
         if self._downsample > 1:
             image = image[..., :: self._downsample, :: self._downsample]
+
+        if self._channel is not None:
+            image = image[self._channel]
+            # Use np.expand_dims to add the channel dimension back
+            image = np.expand_dims(image, axis=0)
 
         # Return image and dummy label (for compatibility)
         return image, np.zeros(0)

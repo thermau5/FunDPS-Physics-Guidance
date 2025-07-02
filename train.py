@@ -65,6 +65,7 @@ def main():
         use_labels=conf["cond"],
         xflip=conf["xflip"],
         cache=conf["cache"],
+        channel=conf["channel"],
     )
     c.data_loader_kwargs = dnnlib.EasyDict(num_workers=conf["workers"], pin_memory=True, prefetch_factor=2)
     c.network_kwargs = dnnlib.EasyDict()
