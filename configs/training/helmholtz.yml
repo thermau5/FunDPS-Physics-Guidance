@@ -7,7 +7,7 @@ arch: "ddpmpp-uno"  # Network architecture (options: ddpmpp, ncsnpp, adm, ddpmpp
 precond: "edm"  # Preconditioning & loss function (options: vp, ve, edm)
 
 # Hyperparameters
-duration: 10  # Training duration in millions of images
+duration: 2  # Training duration in millions of images
 batch: 32  # Total batch size
 batch_gpu: null  # Limit batch size per GPU (optional)
 nn_resolution: null  # Resolution of the network, defaults to resolution
