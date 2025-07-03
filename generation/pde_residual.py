@@ -26,6 +26,10 @@ def get_darcy_residual(x_pred):
     deriv_x = torch.tensor([[1, 0, -1]], dtype=torch.float64, device=device).view(1, 1, 1, 3) / (2 * dx)
     deriv_y = torch.tensor([[1], [0], [-1]], dtype=torch.float64, device=device).view(1, 1, 3, 1) / (2 * dx)
 
+    # Ensure kernels are on the same device and dtype as u_pred
+    deriv_x = deriv_x.to(dtype=u_pred.dtype, device=u_pred.device)
+    deriv_y = deriv_y.to(dtype=u_pred.dtype, device=u_pred.device)
+
     # Calculate gradients using finite difference
     grad_x = F.conv2d(u_pred, deriv_x, padding=(0, 1))
     grad_y = F.conv2d(u_pred, deriv_y, padding=(1, 0))
@@ -90,6 +94,10 @@ def get_ns_nonbounded_residual(x_pred):
     dx = 1.0  # JIACHEN: it is more accurate when dx=1.0
     deriv_x = torch.tensor([[1, 0, -1]], dtype=torch.float64, device=device).view(1, 1, 1, 3) / (2 * dx)
     deriv_y = torch.tensor([[1], [0], [-1]], dtype=torch.float64, device=device).view(1, 1, 3, 1) / (2 * dx)
+
+    # Ensure kernels are on the same device and dtype as vorticity
+    deriv_x = deriv_x.to(dtype=vorticity.dtype, device=vorticity.device)
+    deriv_y = deriv_y.to(dtype=vorticity.dtype, device=vorticity.device)
 
     # Calculate divergence of vorticity
     div_vort_x = F.conv2d(vorticity, deriv_x, padding=(0, 1))
@@ -156,6 +164,10 @@ def get_burgers_residual(x_pred):
     deriv_t = torch.tensor([[1], [0], [-1]], dtype=torch.float64, device=device).view(1, 1, 3, 1) / (2 * dx)
     deriv_x = torch.tensor([[1, 0, -1]], dtype=torch.float64, device=device).view(1, 1, 1, 3) / (2 * dx)
 
+    # Ensure kernels are on the same device and dtype as u_pred
+    deriv_t = deriv_t.to(dtype=u_pred.dtype, device=u_pred.device)
+    deriv_x = deriv_x.to(dtype=u_pred.dtype, device=u_pred.device)
+
     # Calculate temporal derivative ∂u/∂t
     u_t = F.conv2d(u_pred, deriv_t, padding=(1, 0))
 
@@ -182,6 +194,11 @@ def get_ns_bounded_residual(x_pred):
     dx = 1.0
     deriv_x = torch.tensor([[1, 0, -1]], dtype=torch.float64, device=device).view(1, 1, 1, 3) / (2 * dx)
     deriv_y = torch.tensor([[1], [0], [-1]], dtype=torch.float64, device=device).view(1, 1, 3, 1) / (2 * dx)
+
+    # Ensure kernels are on the same device and dtype as u_pred
+    deriv_x = deriv_x.to(dtype=u_pred.dtype, device=u_pred.device)
+    deriv_y = deriv_y.to(dtype=u_pred.dtype, device=u_pred.device)
+
     grad_x = F.conv2d(u_pred, deriv_x, padding=(0, 1))
     grad_y = F.conv2d(u_pred, deriv_y, padding=(1, 0))
     pde_residual = grad_x + grad_y
