@@ -38,7 +38,7 @@ observation:
 # Guidance options
 guidance:
   type: "dps"
-  weights: [10000, 0, 0, 2000]
+  weights: [10000, 0, 0, 0]
 
 # I/O-related
 n_plots: 4  # number of samples to plot
