@@ -14,8 +14,8 @@ class DatasetNormalizer:
         Initialize the normalizer with dataset-specific parameters.
         """
         self.dataset_name = dataset_name
-        self.mean = torch.tensor(stats["mean"]).reshape(1, 2, 1, 1)
-        self.std = torch.tensor(stats["std"]).reshape(1, 2, 1, 1)
+        self.mean = torch.tensor(stats["mean"]).reshape(1, len(stats["mean"]), 1, 1)
+        self.std = torch.tensor(stats["std"]).reshape(1, len(stats["std"]), 1, 1)
         self._transform = lambda x: x
         if dataset_name == "darcy":
             self._transform = transform_darcy
@@ -23,21 +23,31 @@ class DatasetNormalizer:
     def _check_shape(self, x: torch.Tensor):
         # Assuming x has shape (batch_size, channels, height, width)
         assert len(x.shape) == 4, f"Expected 4D tensor, got {len(x.shape)}D"
-        assert x.shape[1] == 2, f"Expected 2 channels, got {x.shape[1]}"
+        assert x.shape[1] in [1, 2], f"Expected 1 or 2 channels, got {x.shape[1]}"
         return True
 
-    def normalize(self, x: torch.Tensor) -> torch.Tensor:
+    def normalize(self, x: torch.Tensor, channel=None) -> torch.Tensor:
         self._check_shape(x)
-        self.mean = self.mean.to(x.device)
-        self.std = self.std.to(x.device)
-        x_normalized = (x - self.mean) * (0.5 / self.std)
+        mean = self.mean
+        std = self.std
+        if channel is not None:
+            mean = mean[:, channel, :, :].reshape(1, -1, 1, 1)
+            std = std[:, channel, :, :].reshape(1, -1, 1, 1)
+        mean = mean.to(x.device)
+        std = std.to(x.device)
+        x_normalized = (x - mean) * (0.5 / std)
         return x_normalized
 
-    def denormalize(self, x_normalized: torch.Tensor) -> torch.Tensor:
+    def denormalize(self, x_normalized: torch.Tensor, channel=None) -> torch.Tensor:
         self._check_shape(x_normalized)
-        self.mean = self.mean.to(x_normalized.device)
-        self.std = self.std.to(x_normalized.device)
-        x = x_normalized / (0.5 / self.std) + self.mean
+        mean = self.mean
+        std = self.std
+        if channel is not None:
+            mean = mean[:, channel, :, :].reshape(1, -1, 1, 1)
+            std = std[:, channel, :, :].reshape(1, -1, 1, 1)
+        mean = mean.to(x_normalized.device)
+        std = std.to(x_normalized.device)
+        x = x_normalized / (0.5 / std) + mean
         return x
 
     def transform(self, x: torch.Tensor, denormalize=False) -> torch.Tensor:
