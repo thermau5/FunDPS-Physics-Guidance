@@ -107,8 +107,8 @@ class PDESolver:
             self.plot_results(pred, gt, metrics, self.save_dir)
             if "loss_history" in aux:
                 self.plot_losses(aux["loss_history"], self.save_dir)
-            if "intermediates" in aux:
-                self.plot_process(aux["intermediates"], gt, self.save_dir)
+            if "intermediates" in aux and "intermediates_channel_index" in aux:
+                self.plot_process(aux["intermediates"], aux["intermediates_channel_index"], gt, self.save_dir)
 
         self.finalize_stats(self.save_dir)
 
@@ -202,7 +202,7 @@ class PDESolver:
             if self.cnt_result_plots == self.n_plots:
                 break
 
-    def plot_process(self, intermediates, gt, save_dir):
+    def plot_process(self, intermediates, intermediate_channels_index, gt, save_dir):
         """Plot intermediate results during inference.
 
         Args:
@@ -214,11 +214,10 @@ class PDESolver:
 
         intermediates = [x.detach().cpu().numpy() for x in intermediates]
         gt = gt.detach().cpu().numpy()
+        # gt = np.tile(gt, (1, n_channels // gt.shape[1], 1, 1))
 
         batch_size, n_channels = intermediates[0].shape[:2]
         n_steps = len(intermediates)
-
-        gt = np.tile(gt, (1, n_channels // gt.shape[1], 1, 1))
 
         for batch_idx in range(batch_size):
             fig = plt.figure(figsize=(4 * n_steps, 4 * n_channels))
@@ -230,7 +229,7 @@ class PDESolver:
             for c in range(n_channels):
                 # Get channel data
                 channel_data = [step[batch_idx, c] for step in intermediates]
-                gt_c = gt[batch_idx, c]
+                gt_c = gt[batch_idx, intermediate_channels_index[c]]
 
                 # Get global min/max for consistent colormaps
                 vmin = gt_c.min()
