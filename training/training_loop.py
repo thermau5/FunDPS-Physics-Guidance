@@ -49,6 +49,8 @@ def training_loop(
     cudnn_benchmark=True,  # Enable torch.backends.cudnn.benchmark?
     device=torch.device("cuda"),
     cond=True,  # If True, use conditional diffusion.
+    dataset_name=None,
+    DM_channel=None,  # New argument: which channel(s) to train DM on. None = all channels.
 ):
     # Initialize.
     start_time = time.time()
@@ -75,7 +77,16 @@ def training_loop(
 
     # Construct network.
     dist.print0("Constructing network...")
-    interface_kwargs = dict(img_channels=dataset_obj.num_channels, label_dim=dataset_obj.label_dim)
+    # Determine the number of channels for the network
+    if DM_channel is not None:
+        network_channels = len(DM_channel)
+        dist.print0(f"DM_channel specified: {DM_channel}, using {network_channels} channels for network")
+    else:
+        network_channels = dataset_obj.num_channels
+        dist.print0(f"DM_channel not specified, using all {network_channels} channels from dataset")
+    
+    interface_kwargs = dict(img_channels=network_channels, label_dim=dataset_obj.label_dim)
+    dist.print0(f"Network interface kwargs: {interface_kwargs}")
     net = dnnlib.util.construct_class_by_name(**network_kwargs, **interface_kwargs)  # subclass of torch.nn.Module
     net.train().requires_grad_(True).to(device)
     dist.print0("Number of params: {}".format(misc.count_parameters(net)))
@@ -93,13 +104,40 @@ def training_loop(
             misc.print_module_summary(net, [images, sigma, labels], max_nesting=2)
 
     # Construct loss function.
-    sampler_kwargs.in_channels = dataset_obj.num_channels
+    # Determine the number of channels for the sampler
+    if DM_channel is not None:
+        sampler_channels = len(DM_channel)
+        dist.print0(f"Using {sampler_channels} channels for sampler (DM_channel: {DM_channel})")
+    else:
+        sampler_channels = dataset_obj.num_channels
+        dist.print0(f"Using {sampler_channels} channels for sampler (dataset channels)")
+    
+    sampler_kwargs.in_channels = sampler_channels
     sampler_kwargs.Ln1 = dataset_obj.resolution
     sampler_kwargs.Ln2 = dataset_obj.resolution
     # Have to specify `device` here since it is not serialisable
     sampler_kwargs.device = device
     loss_kwargs.sampler = dnnlib.util.construct_class_by_name(**sampler_kwargs)  # TODO multiresolution
-    loss_fn = dnnlib.util.construct_class_by_name(**loss_kwargs)  # training.loss.(VP|VE|EDM)Loss
+
+    # Only add fno_surrogate if using PI_EDMLossWithSampler
+    if loss_kwargs.get('class_name', '') == "training.loss.PI_EDMLossWithSampler":
+        from generation.observation import FNO
+        fno_surrogate = FNO(
+            n_modes=(64, 64),
+            in_channels=1,
+            out_channels=1,
+            hidden_channels=64,
+            n_layers=4,
+        )
+        model_path = f"generation/fno_trained_forward_{dataset_name}.pth"
+        state_dict = torch.load(model_path, map_location="cpu")
+        fno_surrogate.load_state_dict(state_dict)
+        fno_surrogate.eval()
+        fno_surrogate.requires_grad_(False)
+        loss_kwargs['fno_surrogate'] = fno_surrogate
+
+    # Now construct the loss function
+    loss_fn = dnnlib.util.construct_class_by_name(**loss_kwargs) # training.loss.(VP|VE|EDM|PI_EDM)Loss
 
     # Setup optimizer.
     dist.print0("Setting up optimizer...")
@@ -146,7 +184,27 @@ def training_loop(
                 images, labels = next(dataset_iterator)
                 images = images.to(device).to(torch.float32)
                 labels = labels.to(device) if cond else None
-                loss = loss_fn(net=ddp, images=images, labels=labels, augment_pipe=augment_pipe)
+                if DM_channel is None:  # Feed original dataset (all channels) to DM, whether it is one or two channels
+                    loss = loss_fn(net=ddp, images=images, labels=labels, augment_pipe=augment_pipe)
+                else:
+                    # When DM_channel is specified, select only those channel(s) for DM input/output
+                    # The full images tensor (all channels) is still available as 'images' here, so loss functions
+                    # that require the full ground truth (e.g., for physics-informed loss) can access it if needed.
+                    if loss_kwargs.get('class_name', '') == "training.loss.PI_EDMLossWithSampler":
+                        assert images.shape[1] == 2, "Dataset must have two channels for PI_EDMLossWithSampler"
+                        assert DM_channel == [0], "PI_EDMLossWithSampler requires DM training on parameter channel only"
+                        dm_images = images[:, DM_channel, ...]
+                        # print(f'images.shape: {images.shape}')
+                        # print(f'dm_images.shape: {dm_images.shape}')
+                        # print(f'labels: {labels}')
+                        # print(f'augment_pipe: {augment_pipe}')
+                        loss = loss_fn(net=ddp, images=dm_images, labels=labels, augment_pipe=augment_pipe, gt_images=images)
+                    else: # DM_channel is assigned but not using physics-informed loss class - not suggested to use
+                        # assert loss_kwargs.get('class_name', '') == "training.loss.PI_EDMLossWithSampler" # currently ban selecting dm_channel w/o pi_edm
+                        dm_images = images[:, DM_channel, ...]
+                        # print(f'images.shape: {images.shape}')
+                        # print(f'dm_images.shape: {dm_images.shape}')
+                        loss = loss_fn(net=ddp, images=dm_images, labels=labels, augment_pipe=augment_pipe)
                 training_stats.report("Loss/loss", loss)
                 loss.sum().mul(loss_scaling / batch_gpu_total).backward()
 
