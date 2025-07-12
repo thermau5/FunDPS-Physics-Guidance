@@ -116,6 +116,11 @@ def main():
     elif conf["precond"] == "edm":
         c.network_kwargs.class_name = "training.networks.EDMPrecond"
         c.loss_kwargs.class_name = "training.loss.EDMLossWithSampler" if conf["arch"] == "ddpmpp-uno" else "training.loss.EDMLoss"
+    elif conf["precond"] == "pi_edm":
+        c.network_kwargs.class_name = "training.networks.EDMPrecond"
+        c.loss_kwargs.class_name = "training.loss.PI_EDMLossWithSampler"
+        # Do NOT add fno_surrogate to c.loss_kwargs here!
+        # Just build the config as usual
     else:
         raise ValueError(f"Invalid preconditioning: {conf['precond']}")
 
@@ -189,6 +194,10 @@ def main():
         # dnnlib.util.Logger(file_name=os.path.join(c.run_dir, "log.txt"), file_mode="a", should_flush=True)
 
     # Train.
+    data_path = conf['data']
+    dataset_name = os.path.basename(os.path.normpath(data_path)).split('_')[0]
+    c.dataset_name = dataset_name
+    c.DM_channel = conf["DM_channel"]
     training_loop.training_loop(**c)
 
     if dist.get_rank() == 0:

@@ -74,8 +74,8 @@ class PDEDataset(Dataset):
             self._channel = None
         elif isinstance(channel, int):
             self._channel = [channel]
-        else:
-            self._channel = list(channel)
+        elif isinstance(channel, list) and isinstance(channel[0], int):
+            self._channel = channel
 
         if self._channel is not None:
             # Update channel dimension in _raw_shape to reflect selected channels
