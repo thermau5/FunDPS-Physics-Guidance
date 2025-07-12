@@ -120,3 +120,53 @@ class EDMLossWithSampler:
         D_yn = net(y + n, sigma, labels, augment_labels=augment_labels)
         loss = weight * ((D_yn - y) ** 2)
         return loss
+
+class PI_EDMLossWithSampler:
+    def __init__(self, sampler, fno_surrogate, P_mean=-1.2, P_std=1.2, sigma_data=0.5):
+        self.sampler = sampler
+        self.fno_surrogate = fno_surrogate  # FNO surrogate model
+        self.P_mean = P_mean
+        self.P_std = P_std
+        self.sigma_data = sigma_data
+
+    def __call__(self, net, images, labels=None, augment_pipe=None, gt_images=None):
+        # Data loss calculation (same as EDMLossWithSampler)
+        rnd_normal = torch.randn([images.shape[0], 1, 1, 1], device=images.device)
+        sigma = (rnd_normal * self.P_std + self.P_mean).exp()
+        weight = (sigma**2 + self.sigma_data**2) / (sigma * self.sigma_data) ** 2
+
+        if labels is not None:
+            x_dim = images.size(1)
+            all_images = torch.cat((images, labels), dim=1)
+            all_images_augmented, augment_labels = augment_pipe(all_images) if augment_pipe is not None else (images, None)
+            y = all_images_augmented[:, 0:x_dim]
+            labels = all_images_augmented[:, x_dim::]
+        else:
+            y, augment_labels = images, None
+
+        n = self.sampler.sample(y.size(0)) * sigma
+        D_yn = net(y + n, sigma, labels, augment_labels=augment_labels)
+        data_loss = weight * ((D_yn - y) ** 2)  # Data loss on DM input channels
+
+        # Physics loss calculation (requires gt_images)
+        if gt_images is not None:
+            assert gt_images.shape[1] == 2, "Ground truth images must have 2 channels (param, solution)"
+            param_gt = gt_images[:, 0:1, :, :]  # Ground truth parameter
+            solution_gt = gt_images[:, 1:2, :, :]  # Ground truth solution
+            
+            # FNO surrogate prediction (1-channel input, 1-channel output)
+            self.fno_surrogate.eval()
+            with torch.no_grad():
+                surrogate_of_param_pred = self.fno_surrogate(
+                    D_yn.to(dtype=torch.float32, device=next(self.fno_surrogate.parameters()).device)
+                )
+                surrogate_of_param_pred = surrogate_of_param_pred.to(solution_gt.device, dtype=solution_gt.dtype)
+
+            # Physics loss: compare surrogate's prediction to ground truth solution
+            physics_loss = (surrogate_of_param_pred - solution_gt) ** 2  # MSE per-pixel
+        else:
+            # If no gt_images provided, physics loss is zero
+            physics_loss = torch.zeros_like(data_loss)
+
+        # Return sum of data loss and physics loss
+        return data_loss + physics_loss
