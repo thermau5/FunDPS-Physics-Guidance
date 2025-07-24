@@ -130,7 +130,15 @@ def training_loop(
             n_layers=4,
         )
         model_path = f"generation/fno_trained_forward_{dataset_name}.pth"
-        state_dict = torch.load(model_path, map_location="cpu")
+        # Get the major and minor version as integers
+        torch_version = tuple(map(int, torch.__version__.split(".")[:2]))
+
+        if torch_version >= (2, 6):
+            # PyTorch 2.6+ supports weights_only argument
+            state_dict = torch.load(model_path, map_location="cpu", weights_only=False)
+        else:
+            # Older versions do not support weights_only
+            state_dict = torch.load(model_path, map_location="cpu")
         fno_surrogate.load_state_dict(state_dict)
         fno_surrogate.eval()
         fno_surrogate.requires_grad_(False)
