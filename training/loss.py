@@ -156,11 +156,10 @@ class PI_EDMLossWithSampler:
             
             # FNO surrogate prediction (1-channel input, 1-channel output)
             self.fno_surrogate.eval()
-            with torch.no_grad():
-                surrogate_of_param_pred = self.fno_surrogate(
-                    D_yn.to(dtype=torch.float32, device=next(self.fno_surrogate.parameters()).device)
-                )
-                surrogate_of_param_pred = surrogate_of_param_pred.to(solution_gt.device, dtype=solution_gt.dtype)
+            surrogate_of_param_pred = self.fno_surrogate(
+                D_yn.to(dtype=torch.float32, device=next(self.fno_surrogate.parameters()).device)
+            )
+            surrogate_of_param_pred = surrogate_of_param_pred.to(solution_gt.device, dtype=solution_gt.dtype)
 
             # Physics loss: compare surrogate's prediction to ground truth solution
             physics_loss = (surrogate_of_param_pred - solution_gt) ** 2  # MSE per-pixel
