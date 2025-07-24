@@ -7,8 +7,8 @@ arch: "ddpmpp-uno"  # Network architecture (options: ddpmpp, ncsnpp, adm, ddpmpp
 precond: "pi_edm"  # Preconditioning & loss function (options: vp, ve, edm)
 
 # Hyperparameters
-duration: 2  # Training duration in millions of images
-batch: 8  # Total batch size
+duration: 5  # Training duration in millions of images
+batch: 16  # Total batch size
 batch_gpu: null  # Limit batch size per GPU (optional)
 nn_resolution: null  # Resolution of the network, defaults to resolution
 cbase: 64  # Channel multiplier (optional, varies by default)
