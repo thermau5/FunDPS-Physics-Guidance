@@ -135,11 +135,13 @@ def training_loop(
 
         if torch_version >= (2, 6):
             # PyTorch 2.6+ supports weights_only argument
-            state_dict = torch.load(model_path, map_location="cpu", weights_only=False)
+            state_dict = torch.load(model_path, weights_only=False)
         else:
             # Older versions do not support weights_only
-            state_dict = torch.load(model_path, map_location="cpu")
+            state_dict = torch.load(model_path)
+        
         fno_surrogate.load_state_dict(state_dict)
+        fno_surrogate.to("cuda")
         fno_surrogate.eval()
         fno_surrogate.requires_grad_(False)
         loss_kwargs['fno_surrogate'] = fno_surrogate
