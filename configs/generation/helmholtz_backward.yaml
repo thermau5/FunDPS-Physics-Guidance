@@ -25,7 +25,7 @@ rho: 7
 # Loss options
 observation: 
   - type: "sparse"
-    loss_type: "l2"  # mse, l1, l2, or huber
+    loss_type: "l1"  # mse, l1, l2, or huber
     known_indices: [500, 500]
     normalize: true
   - type: "pde"
@@ -38,7 +38,7 @@ observation:
 # Guidance options
 guidance:
   type: "dps"
-  weights: [0, 1000, 0, 0]
+  weights: [0, 500, 0, 0]
 
 # I/O-related
 n_plots: 4  # number of samples to plot
