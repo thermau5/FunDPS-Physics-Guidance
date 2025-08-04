@@ -167,5 +167,6 @@ class PI_EDMLossWithSampler:
             # If no gt_images provided, physics loss is zero
             physics_loss = torch.zeros_like(data_loss)
 
+        # print(f'Data Loss:{data_loss.sum()}. Phys Loss: {physics_loss.sum()}.')
         # Return sum of data loss and physics loss
         return data_loss + physics_loss
