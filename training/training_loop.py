@@ -195,6 +195,7 @@ def training_loop(
                 images = images.to(device).to(torch.float32)
                 labels = labels.to(device) if cond else None
                 if DM_channel is None:  # Feed original dataset (all channels) to DM, whether it is one or two channels
+                    # dist.print0(f'F0 or F1 first condition: DM_channel is None, images.shape: {images.shape}')
                     loss = loss_fn(net=ddp, images=images, labels=labels, augment_pipe=augment_pipe)
                 else:
                     # When DM_channel is specified, select only those channel(s) for DM input/output
@@ -204,16 +205,11 @@ def training_loop(
                         assert images.shape[1] == 2, "Dataset must have two channels for PI_EDMLossWithSampler"
                         assert DM_channel == [0], "PI_EDMLossWithSampler requires DM training on parameter channel only"
                         dm_images = images[:, DM_channel, ...]
-                        # print(f'images.shape: {images.shape}')
-                        # print(f'dm_images.shape: {dm_images.shape}')
-                        # print(f'labels: {labels}')
-                        # print(f'augment_pipe: {augment_pipe}')
                         loss = loss_fn(net=ddp, images=dm_images, labels=labels, augment_pipe=augment_pipe, gt_images=images)
                     else: # DM_channel is assigned but not using physics-informed loss class - not suggested to use
                         # assert loss_kwargs.get('class_name', '') == "training.loss.PI_EDMLossWithSampler" # currently ban selecting dm_channel w/o pi_edm
                         dm_images = images[:, DM_channel, ...]
-                        # print(f'images.shape: {images.shape}')
-                        # print(f'dm_images.shape: {dm_images.shape}')
+                        # dist.print0(f'F1 second condition: DM_channel is not None, images.shape: {images.shape}, dm_images.shape: {dm_images.shape}')
                         loss = loss_fn(net=ddp, images=dm_images, labels=labels, augment_pipe=augment_pipe)
                 training_stats.report("Loss/loss", loss)
                 loss.sum().mul(loss_scaling / batch_gpu_total).backward()

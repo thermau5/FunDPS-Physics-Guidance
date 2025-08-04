@@ -53,7 +53,11 @@ class PDESolverDPS(PDESolver):
 
         for i, (sigma_t_cur, sigma_t_next) in enumerate(tqdm(zip(sigma_t_steps[:-1], sigma_t_steps[1:]), total=self.num_steps)):
             x_cur = x_next.detach().clone()
-            x_cur.requires_grad_(True)
+            if any(w != 0 for w in self.weights):  # Only enable gradient tracking if any guidance weight is non-zero
+                x_cur.requires_grad_(True)
+            else:
+                # When all guidance weights are 0, don't enable gradient tracking to save memory
+                x_cur.requires_grad_(False)
             sigma_t = self.net.round_sigma(sigma_t_cur)
             # print("x_cur.requires_grad:", x_cur.requires_grad)
             # print("x_cur.grad_fn:", x_cur.grad_fn)
