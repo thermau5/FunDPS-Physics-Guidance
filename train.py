@@ -95,7 +95,7 @@ def main():
         c.network_kwargs.update(model_type="DhariwalUNet", model_channels=192, channel_mult=[1, 2, 3, 4])
     elif conf["arch"] == "ddpmpp-uno":
         c.network_kwargs.update(model_type="SongUNO", embedding_type="positional", encoder_type="standard", decoder_type="standard")
-        c.network_kwargs.update(channel_mult_noise=1, resample_filter=[1, 1], model_channels=128, channel_mult=[2, 2, 2])
+        # c.network_kwargs.update(channel_mult_noise=1, resample_filter=[1, 1], model_channels=64, channel_mult=[2, 2, 2])
         c.network_kwargs.update(
             cond=conf["cond"],
             attn_resolutions=conf["attn_resolutions"],
