@@ -7,7 +7,7 @@ from tqdm import tqdm
 from training.dataset_utils import DatasetNormalizer
 
 from .base import PDESolver
-
+from generation.observation import FNO  # ADDED
 
 class Scheduler(nn.Module):
     """Scheduler for diffusion sigma(t) and discretization step size Delta t"""
@@ -88,7 +88,6 @@ class PDESolverDAPS(PDESolver):
     def __init__(self, config):
 
         super().__init__(config)
-        self.normalizer = DatasetNormalizer(config["dataset"])
 
         self.annealing_config = config["guidance"]["annealing"].to_dict()
         self.diffusion_config = config["guidance"]["diffusion"].to_dict()
@@ -99,8 +98,30 @@ class PDESolverDAPS(PDESolver):
         self.langevin_steps = self.langevin_config["num_steps"]
         self.langevin_weights = torch.tensor(self.langevin_config["weights"], device=self.device).view(1, -1)
 
-        assert self.num_steps == self.annealing_config["num_steps"]
+        # assert self.num_steps == self.annealing_config["num_steps"]
+        self.num_steps = self.annealing_config["num_steps"]
+        self.save_indices = np.linspace(0, self.num_steps - 1, self.n_process_steps, dtype=int)
         assert self.observations[0].type == "sparse"
+
+        # ADDED: forward surrogate to synthesize the second channel when DM is one-channel
+        self.fno_surrogate = FNO(
+            n_modes=(64, 64),
+            in_channels=1,
+            out_channels=1,
+            hidden_channels=64,
+            n_layers=4
+        )
+        # ADDED: load trained forward surrogate (same pathing convention as dps.py)
+        model_path = f"generation/fno_trained_forward_{config['dataset']}.pth"
+        state_dict = torch.load(model_path)
+        self.fno_surrogate.load_state_dict(state_dict)
+        self.fno_surrogate.to(self.device)
+        self.fno_surrogate.eval()
+        self.fno_surrogate.requires_grad_(False)  # freeze weights; gradients still flow to inputs
+
+    def load_data(self):
+        super().load_data()
+        self.normalizer = self.dataset.create_normalizer()
 
     def generate_single_batch(self, observations):
         """Generate a single batch of samples using DAPS.
@@ -120,6 +141,7 @@ class PDESolverDAPS(PDESolver):
 
         # Store intermediates if requested
         intermediates = []
+        intermediates_channel_index = None
 
         for step in tqdm(range(annealing_scheduler.num_steps), unit="step"):
             sigma_t = annealing_scheduler.sigma_steps[step]
@@ -141,6 +163,12 @@ class PDESolverDAPS(PDESolver):
                 denorm_x0y = self.normalizer.denormalize(x0y)
                 denorm_xt = self.normalizer.denormalize(xt)
                 intermediates.append(torch.cat([denorm_x0, denorm_x0y, denorm_xt], dim=1))
+                
+                if intermediates_channel_index is None:
+                    C1 = denorm_x0.shape[1]
+                    C2 = denorm_x0y.shape[1]
+                    C3 = denorm_xt.shape[1]
+                    intermediates_channel_index = list(range(C1)) + list(range(C2)) + list(range(C3))
 
             if xt.isnan().any():
                 print(f"Step {step}: NaN detected!")
@@ -148,9 +176,18 @@ class PDESolverDAPS(PDESolver):
 
         # Transform final result
         x_final = xt.detach()
+
+        # ADDED: if final has one channel, synthesize the missing channel before transform (mirrors dps.py behavior)
+        if x_final.shape[1] == 1:
+            device = x_final.device
+            self.fno_surrogate = self.fno_surrogate.to(device)
+            x_for_sur = x_final.to(dtype=torch.float32, device=device)
+            sol_pred = self.fno_surrogate(x_for_sur)
+            x_final = torch.cat([x_for_sur, sol_pred], dim=1)
+
         pred = self.normalizer.transform(x_final, denormalize=True)
 
-        return pred, {"intermediates": intermediates}
+        return pred, {"intermediates": intermediates, "intermediates_channel_index": intermediates_channel_index}
 
     def _reverse_diffusion(self, x_cur, scheduler):
         """Perform reverse diffusion process.
@@ -214,8 +251,18 @@ class PDESolverDAPS(PDESolver):
             # Compute loss terms
             prior_loss = ((x - x0hat.detach()) ** 2).sum()
 
+            # ADDED: if DM state is one-channel, concatenate surrogate-predicted solution channel
+            if x.shape[1] == 1:
+                device = x.device
+                self.fno_surrogate = self.fno_surrogate.to(device)
+                x_for_sur = x.to(dtype=torch.float32, device=device)
+                sol_pred = self.fno_surrogate(x_for_sur)            # autograd tracks w.r.t. x
+                x_for_loss = torch.cat([x_for_sur, sol_pred], dim=1)  # [B,2,H,W]
+            else:
+                x_for_loss = x
+
             obs_loss = []
-            denorm_x = self.normalizer.denormalize(x)
+            denorm_x = self.normalizer.denormalize(x_for_loss)
             for obs in observations:
                 loss = obs.get_observation_loss(denorm_x)
                 obs_loss.append(loss)
