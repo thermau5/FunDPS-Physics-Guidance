@@ -15,7 +15,7 @@ pkl_path: '__required__'
 rbf_scale: 0.05
 
 # Generation options
-seed: null
+seed: 2022862047 #1995291328
 init_latents: "rbf"  # rbf or white_noise
 iterations: 500
 sigma_min: 0.002
@@ -36,9 +36,30 @@ observation:
     normalize: true
 
 # Guidance options
+# guidance:
+#   type: "dps"
+#   weights: [0, 2000, 0, 0]
 guidance:
-  type: "dps"
-  weights: [0, 500, 0, 0]
+  type: "daps"
+  annealing:
+    num_steps: 200
+    sigma_max: 10
+    sigma_min: 0.01
+    sigma_final: 0
+    rho: 7
+  diffusion:
+    num_steps: 5
+    sigma_min: 0.001
+    sigma_final: 0
+    rho: 7
+  langevin:
+    num_steps: 10
+    lr: 1.0e-4
+    lr_min_ratio: 0.01
+    lr_rho: 1
+    eta: 0.1  # noise level
+    tau: 0.001  # the inverse of observation importance
+    weights: [0, 10, 0, 0]
 
 # I/O-related
 n_plots: 4  # number of samples to plot
