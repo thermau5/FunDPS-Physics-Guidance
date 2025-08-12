@@ -25,8 +25,9 @@ class PDESolverDPS(PDESolver):
         )
         # Load forward surrogate model
         model_path = f"generation/fno_trained_forward_{config['dataset']}.pth"
-        state_dict = torch.load(model_path, map_location="cpu")
+        state_dict = torch.load(model_path)
         self.fno_surrogate.load_state_dict(state_dict)
+        self.fno_surrogate.to("cuda")
         self.fno_surrogate.eval()
         self.fno_surrogate.requires_grad_(False)
 
