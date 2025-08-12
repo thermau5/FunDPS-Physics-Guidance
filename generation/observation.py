@@ -201,12 +201,12 @@ class FNOObservation(Observation):
         model_path = f"generation/fno_trained_{task}_{dataset_name}.pth"
 
         try:
-            state_dict = torch.load(model_path, map_location="cpu", weights_only=False)
+            state_dict = torch.load(model_path, weights_only=False)
         except TypeError:
             # For older torch versions that do not support weights_only
-            state_dict = torch.load(model_path, map_location="cpu")
-
+            state_dict = torch.load(model_path)
         self.fno.load_state_dict(state_dict)
+        self.fno.to("cuda")
 
         # (3) freeze the operator
         self.fno.requires_grad_(False)
