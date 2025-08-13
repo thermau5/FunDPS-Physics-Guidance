@@ -16,7 +16,7 @@ from scipy.io import loadmat
 from training.dataset_hf import PDEDataset
 
 pde_direction = 'inverse'  # or 'inverse', depending on the dataset
-dataset_name = 'darcy'  # Name of the dataset for saving/loading models
+dataset_name = 'helmholtz'  # Name of the dataset for saving/loading models
 
 # === Load training data ===
 train_dataset = PDEDataset(path=f'data/DiffPDE/{dataset_name}_hf', resolution=128)
@@ -27,169 +27,126 @@ test_dataset = PDEDataset(path=f'data/DiffPDE/{dataset_name}_test_hf', resolutio
 test_loader = DataLoader(test_dataset, shuffle=False)
 
 
-def visualize_sample_or_pred(input_field, ground_truth_field, model, device, visualize_pred=False):
-    """
-    Visualizes an input-ground_truth pair from a given dataset at the specified index.
-    Assumes input and ground_truth tensors are in (batch, channels, height, width) format.
-    Optionally includes model predictions if `visualize_pred` is True.
-    If `model` is None, only input and ground_truth will be visualized.
-    """
-    # Convert to PyTorch tensors and move to device
-    input_field = torch.tensor(input_field).to(device).float()
-    ground_truth_field = torch.tensor(ground_truth_field).to(device).float()
+# def visualize_sample_or_pred(input_field, ground_truth_field, model, device, visualize_pred=False):
+#     """
+#     Visualizes an input-ground_truth pair from a given dataset at the specified index.
+#     Assumes input and ground_truth tensors are in (batch, channels, height, width) format.
+#     Optionally includes model predictions if `visualize_pred` is True.
+#     If `model` is None, only input and ground_truth will be visualized.
+#     """
+#     # Convert to PyTorch tensors and move to device
+#     input_field = torch.tensor(input_field).to(device).float()
+#     ground_truth_field = torch.tensor(ground_truth_field).to(device).float()
 
-    # Prediction: Get the model's prediction for the input sample if visualize_pred is True
-    if visualize_pred and model is not None:
-        prediction_field = model(input_field.unsqueeze(0)).squeeze(0)  # Add batch dimension
-    else:
-        prediction_field = None
+#     # Prediction: Get the model's prediction for the input sample if visualize_pred is True
+#     if visualize_pred and model is not None:
+#         prediction_field = model(input_field.unsqueeze(0)).squeeze(0)  # Add batch dimension
+#     else:
+#         prediction_field = None
 
-    # Move to CPU and detach from the computation graph
-    input_field = input_field.detach().cpu()
-    ground_truth_field = ground_truth_field.detach().cpu()
+#     # Move to CPU and detach from the computation graph
+#     input_field = input_field.detach().cpu()
+#     ground_truth_field = ground_truth_field.detach().cpu()
 
-    if prediction_field is not None:
-        prediction_field = prediction_field.detach().cpu()
+#     if prediction_field is not None:
+#         prediction_field = prediction_field.detach().cpu()
 
-    # Get the number of channels
-    input_channels = input_field.shape[0]
-    ground_truth_channels = ground_truth_field.shape[0]
+#     # Get the number of channels
+#     input_channels = input_field.shape[0]
+#     ground_truth_channels = ground_truth_field.shape[0]
 
-    # Set up subplots
-    num_cols = max(input_channels, ground_truth_channels)
+#     # Set up subplots
+#     num_cols = max(input_channels, ground_truth_channels)
 
-    # Adjust figure size based on whether prediction needs to be visualized
-    figsize = (5 * num_cols, 5 * 3) if visualize_pred else (5 * num_cols, 5 * 2)
-    fig, axs = plt.subplots(3 if visualize_pred else 2, num_cols, figsize=figsize)
+#     # Adjust figure size based on whether prediction needs to be visualized
+#     figsize = (5 * num_cols, 5 * 3) if visualize_pred else (5 * num_cols, 5 * 2)
+#     fig, axs = plt.subplots(3 if visualize_pred else 2, num_cols, figsize=figsize)
 
-    if num_cols == 1:
-        axs = axs.reshape(3 if visualize_pred else 2, 1)
+#     if num_cols == 1:
+#         axs = axs.reshape(3 if visualize_pred else 2, 1)
 
-    # Plot input channels
-    for c in range(input_channels):
-        img = input_field[c, :, :].numpy()
-        axs[0, c].imshow(img, cmap='viridis')
-        title = f'Input: component {c}' if input_channels > 1 else 'Input Field'
-        axs[0, c].set_title(title)
+#     # Plot input channels
+#     for c in range(input_channels):
+#         img = input_field[c, :, :].numpy()
+#         axs[0, c].imshow(img, cmap='viridis')
+#         title = f'Input: component {c}' if input_channels > 1 else 'Input Field'
+#         axs[0, c].set_title(title)
 
-    # Plot prediction channels if visualize_pred is True
-    if prediction_field is not None:
-        for c in range(ground_truth_channels):
-            img = prediction_field[c, :, :].numpy()
-            axs[1, c].imshow(img, cmap='viridis')
-            title = f'Predicted: component {c}' if ground_truth_channels > 1 else 'Predicted Field'
-            axs[1, c].set_title(title)
+#     # Plot prediction channels if visualize_pred is True
+#     if prediction_field is not None:
+#         for c in range(ground_truth_channels):
+#             img = prediction_field[c, :, :].numpy()
+#             axs[1, c].imshow(img, cmap='viridis')
+#             title = f'Predicted: component {c}' if ground_truth_channels > 1 else 'Predicted Field'
+#             axs[1, c].set_title(title)
 
-    # Plot ground_truth channels
-    for c in range(ground_truth_channels):
-        img = ground_truth_field[c, :, :].numpy()
-        axs[-1, c].imshow(img, cmap='viridis')
-        title = f'Ground Truth: component {c}' if ground_truth_channels > 1 else 'Ground Truth'
-        axs[-1, c].set_title(title)
+#     # Plot ground_truth channels
+#     for c in range(ground_truth_channels):
+#         img = ground_truth_field[c, :, :].numpy()
+#         axs[-1, c].imshow(img, cmap='viridis')
+#         title = f'Ground Truth: component {c}' if ground_truth_channels > 1 else 'Ground Truth'
+#         axs[-1, c].set_title(title)
 
-    plt.tight_layout()
-    plt.show()
+#     plt.tight_layout()
+#     plt.show()
 
 
-# === Visualize training samples ===
-print("Visualizing training samples:")
-for i in range(1):  # Visualize first sample from the training dataset
-    data, _ = train_dataset[i]
-    if pde_direction == 'forward':
-        input_field = data[0:1, :, :]  # First channel as input
-        ground_truth_field = data[1:2, :, :]  # Second channel as ground_truth
-    elif pde_direction == 'inverse':
-        input_field = data[1:2, :, :]  # First channel as input
-        ground_truth_field = data[0:1, :, :]
-    visualize_sample_or_pred(input_field, ground_truth_field, model=None, device=device, visualize_pred=False)
+# # === Visualize training samples ===
+# print("Visualizing training samples:")
+# for i in range(1):  # Visualize first sample from the training dataset
+#     data, _ = train_dataset[i]
+#     if pde_direction == 'forward':
+#         input_field = data[0:1, :, :]  # First channel as input
+#         ground_truth_field = data[1:2, :, :]  # Second channel as ground_truth
+#     elif pde_direction == 'inverse':
+#         input_field = data[1:2, :, :]  # First channel as input
+#         ground_truth_field = data[0:1, :, :]
+#     visualize_sample_or_pred(input_field, ground_truth_field, model=None, device=device, visualize_pred=False)
 
-# === Visualize testing samples ===
-print("Visualizing testing samples:")
-for i in range(1):  # Visualize first sample from the testing dataset
-    data, _ = test_dataset[i]
-    if pde_direction == 'forward':
-        input_field = data[0:1, :, :]
-        ground_truth_field = data[1:2, :, :]  # Second channel as ground_truth
-    elif pde_direction == 'inverse':
-        input_field = data[1:2, :, :]  # First channel as input
-        ground_truth_field = data[0:1, :, :]  # Second channel
-    visualize_sample_or_pred(input_field, ground_truth_field, model=None, device=device, visualize_pred=False)
+# # === Visualize testing samples ===
+# print("Visualizing testing samples:")
+# for i in range(1):  # Visualize first sample from the testing dataset
+#     data, _ = test_dataset[i]
+#     if pde_direction == 'forward':
+#         input_field = data[0:1, :, :]
+#         ground_truth_field = data[1:2, :, :]  # Second channel as ground_truth
+#     elif pde_direction == 'inverse':
+#         input_field = data[1:2, :, :]  # First channel as input
+#         ground_truth_field = data[0:1, :, :]  # Second channel
+#     visualize_sample_or_pred(input_field, ground_truth_field, model=None, device=device, visualize_pred=False)
 
 #%%
 # ============================================================
 # 2. MODEL ARCHITECTURE (CNN ENCODER-DECODER) vs. FOURIER NEURAL OPERATOR (FNO) MODEL
 # ============================================================
 
-# class VectorFieldCNN(nn.Module):
-#     def __init__(self):
-#         super(VectorFieldCNN, self).__init__()
-#         # Encoder: gradually increase feature channels
-#         self.conv1 = nn.Conv2d(2, 32, kernel_size=3, padding=1)
-#         self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
-#         self.pool = nn.MaxPool2d(2, 2)
+model = FNO(
+    n_modes=(64, 64),
+    in_channels=1,      # scalar input
+    out_channels=1,     # scalar output
+    hidden_channels=64,
+    n_layers=4
+)
 
-#         # Bottleneck
-#         self.conv3 = nn.Conv2d(64, 64, kernel_size=3, padding=1)
-
-#         # Decoder: upsampling and reducing channels to 2 (the output vector field)
-#         self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
-#         self.conv4 = nn.Conv2d(64, 32, kernel_size=3, padding=1)
-#         self.conv5 = nn.Conv2d(32, 2, kernel_size=3, padding=1)
-
-#     def forward(self, x):
-#         # Encoder
-#         x = F.relu(self.conv1(x))
-#         x = self.pool(x)
-#         x = F.relu(self.conv2(x))
-#         x_enc = self.pool(x)
-
-#         # Bottleneck
-#         x_bot = F.relu(self.conv3(x_enc))
-
-#         # Decoder
-#         x = self.up(x_bot)
-#         x = F.relu(self.conv4(x))
-#         x = self.up(x)
-#         out = self.conv5(x)
-#         return out
-# model = VectorFieldCNN().to(device)
-
-# Define FNO model with appropriate parameters
-
-# Toy dataset
-# model = FNO(
-#     n_modes=(64, 64),  # Number of Fourier modes per spatial dimension
-#     in_channels=2,     # Input has 2 channels (x and y components)
-#     out_channels=2,    # Output should also have 2 channels
-#     hidden_channels=64, # Number of hidden channels
-#     n_layers=4         # Number of layers in FNO
-# ).to(device)
-
-# model = FNO(
-#     n_modes=(64, 64),
-#     in_channels=1,      # scalar input
-#     out_channels=1,     # scalar output
-#     hidden_channels=64,
-#     n_layers=4
+# model = SongUNO(
+#     img_resolution=64,
+#     in_channels=1,
+#     out_channels=1,
+#     fmult=0.5,
+#     rank=0.1,
+#     model_channels=64,
+#     channel_mult=[1, 2, 2],
+#     num_blocks=2,
+#     attn_resolutions=[16],
+#     dropout=0.10,
+#     cond=False,
 # )
 
-model = SongUNO(
-    img_resolution=64,
-    in_channels=1,
-    out_channels=1,
-    fmult=0.5,
-    rank=0.1,
-    model_channels=64,
-    channel_mult=[1, 2, 2],
-    num_blocks=2,
-    attn_resolutions=[16],
-    dropout=0.10,
-    cond=False,
-)
+# Move model to device
+model = model.to(device)
 
 # count the number of parameters in the model
 print(f"Number of parameters in the model: {sum(p.numel() for p in model.parameters())}")
-exit()
 
 # ============================================================
 # 3. LOSS FUNCTION (L2 LOSS)
@@ -274,16 +231,16 @@ test_loss /= len(test_dataset)
 print(f"Test Loss: {test_loss:.6f}")
 
 # === Visualize predictions ===
-print("Visualizing testing predictions:")
-for i in range(1):  # Visualize first sample from the testing dataset with predictions
-    data, _ = test_dataset[i]
-    if pde_direction == 'forward':
-        input_field = data[0:1, :, :]  # First channel as input
-        ground_truth_field = data[1:2, :, :]  # Second channel as ground_truth
-    elif pde_direction == 'inverse':
-        input_field = data[1:2, :, :]  # First channel as input
-        ground_truth_field = data[0:1, :, :]  # Second channel as ground_truth
-    visualize_sample_or_pred(input_field, ground_truth_field, model=model, device=device, visualize_pred=True)
+# print("Visualizing testing predictions:")
+# for i in range(1):  # Visualize first sample from the testing dataset with predictions
+#     data, _ = test_dataset[i]
+#     if pde_direction == 'forward':
+#         input_field = data[0:1, :, :]  # First channel as input
+#         ground_truth_field = data[1:2, :, :]  # Second channel as ground_truth
+#     elif pde_direction == 'inverse':
+#         input_field = data[1:2, :, :]  # First channel as input
+#         ground_truth_field = data[0:1, :, :]  # Second channel as ground_truth
+#     visualize_sample_or_pred(input_field, ground_truth_field, model=model, device=device, visualize_pred=True)
 
 # #%%
 # # ============================================================
