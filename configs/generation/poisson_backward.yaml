@@ -42,24 +42,24 @@ observation:
 guidance:
   type: "daps"
   annealing:
-    num_steps: 50
+    num_steps: 200
     sigma_max: 10
     sigma_min: 0.01
     sigma_final: 0
     rho: 7
   diffusion:
-    num_steps: 10
+    num_steps: 5
     sigma_min: 0.001
     sigma_final: 0
     rho: 7
   langevin:
     num_steps: 10
-    lr: 1.0e-3
+    lr: 1.0e-4
     lr_min_ratio: 0.01
     lr_rho: 1
     eta: 0.1  # noise level
     tau: 0.001  # the inverse of observation importance
-    weights: [0, 10, 0, 0]
+    weights: [0, 150, 0, 0]
 
 
 # I/O-related
