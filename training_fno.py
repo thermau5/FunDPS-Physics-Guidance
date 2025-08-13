@@ -1,4 +1,10 @@
 #%%
+import warnings
+
+# Suppress PyTorch deprecation warnings about multidimensional indexing
+warnings.filterwarnings("ignore", "Using a non-tuple sequence for multidimensional indexing is deprecated")
+warnings.filterwarnings("ignore", "Using a non-tuple sequence for multidimensional indexing is deprecated and will be changed in pytorch 2.9")
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
