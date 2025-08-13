@@ -14,6 +14,25 @@ from neuralop.models.fno import FNO
 from training.networks import SongUNO
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+# Wrapper class to make SongUNO compatible with direct forward prediction
+class SongUNOWrapper(torch.nn.Module):
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        self.model = SongUNO(*args, **kwargs)
+        
+    def forward(self, x):
+        # Create dummy noise_labels and class_labels for training
+        batch_size = x.shape[0]
+        device = x.device
+        
+        # Create dummy noise_labels (timestep 0 for deterministic prediction)
+        noise_labels = torch.zeros(batch_size, device=device)
+        
+        # Create dummy class_labels (unconditional)
+        class_labels = torch.zeros(batch_size, 0, device=device)  # Empty class labels
+        
+        return self.model(x, noise_labels, class_labels)
+
 # ============================================================
 # 1. DATA LOADING & VISUALIZATION
 # ============================================================
@@ -126,27 +145,27 @@ test_loader = DataLoader(test_dataset, shuffle=False)
 # 2. MODEL ARCHITECTURE (CNN ENCODER-DECODER) vs. FOURIER NEURAL OPERATOR (FNO) MODEL
 # ============================================================
 
-model = FNO(
-    n_modes=(64, 64),
-    in_channels=1,      # scalar input
-    out_channels=1,     # scalar output
-    hidden_channels=64,
-    n_layers=4
-)
-
-# model = SongUNO(
-#     img_resolution=64,
-#     in_channels=1,
-#     out_channels=1,
-#     fmult=0.5,
-#     rank=0.1,
-#     model_channels=64,
-#     channel_mult=[1, 2, 2],
-#     num_blocks=2,
-#     attn_resolutions=[16],
-#     dropout=0.10,
-#     cond=False,
+# model = FNO(
+#     n_modes=(64, 64),
+#     in_channels=1,      # scalar input
+#     out_channels=1,     # scalar output
+#     hidden_channels=64,
+#     n_layers=4
 # )
+
+model = SongUNOWrapper(
+    img_resolution=64,
+    in_channels=1,
+    out_channels=1,
+    fmult=0.5,
+    rank=0.15,  # Slightly increased from 0.1 for better expressiveness
+    model_channels=64,  # Increased from 64 to 68 for ~1.5x parameters
+    channel_mult=[1, 2, 2],  # Keep original for controlled growth
+    num_blocks=2,  # Keep original for controlled growth
+    attn_resolutions=[16],
+    dropout=0.10,
+    cond=False,
+)
 
 # Move model to device
 model = model.to(device)
@@ -211,7 +230,7 @@ for epoch in range(num_epochs):
     epoch_loss = running_loss / len(train_dataset)
     print(f"Epoch {epoch+1}/{num_epochs}, Training Loss: {epoch_loss:.6f}")
 
-# torch.save(model.state_dict(), f"generation/fno_trained_{pde_direction}_{dataset_name}.pth")
+torch.save(model.state_dict(), f"generation/uno_trained_{pde_direction}_{dataset_name}.pth")
 
 #%%
 # ============================================================
