@@ -1,8 +1,39 @@
 import torch
+import torch.nn.functional as F
 from tqdm import tqdm
+import os  # Added for auto-detection
 
 from .base import PDESolver
-from generation.observation import FNO
+from generation.observation import FNO  # For FNO surrogate
+from training.networks import SongUNO  # For UNO surrogate
+
+# Custom FNO_pad class to match training architecture
+class FNO_pad(FNO):
+    def forward(self, x):
+        res_2 = x.shape[-1] // 2
+        x = F.pad(x, (res_2, res_2, res_2, res_2), mode='reflect')
+        ret = super().forward(x)
+        ret = ret[:, :, res_2:-res_2, res_2:-res_2]
+        return ret
+
+# Wrapper class to make SongUNO compatible with direct forward prediction
+class SongUNOWrapper(torch.nn.Module):
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        self.model = SongUNO(*args, **kwargs)
+        
+    def forward(self, x):
+        # Create dummy noise_labels and class_labels for training
+        batch_size = x.shape[0]
+        device = x.device
+        
+        # Create dummy noise_labels (timestep 0 for deterministic prediction)
+        noise_labels = torch.zeros(batch_size, device=device)
+        
+        # Create dummy class_labels (unconditional)
+        class_labels = torch.zeros(batch_size, 0, device=device)  # Empty class labels
+        
+        return self.model(x, noise_labels, None)
 
 
 class PDESolverDPS(PDESolver):
@@ -15,21 +46,79 @@ class PDESolverDPS(PDESolver):
 
         self.weights = config["guidance"]["weights"]
 
-        # In your DPS solver __init__:
-        self.fno_surrogate = FNO(
-            n_modes=(64, 64),
-            in_channels=1,
-            out_channels=1,
-            hidden_channels=64,
-            n_layers=4
-        )
-        # Load forward surrogate model
-        model_path = f"generation/fno_trained_forward_{config['dataset']}.pth"
-        state_dict = torch.load(model_path)
-        self.fno_surrogate.load_state_dict(state_dict)
-        self.fno_surrogate.to("cuda")
-        self.fno_surrogate.eval()
-        self.fno_surrogate.requires_grad_(False)
+        # ADDED: forward surrogate to synthesize the second channel when DM is one-channel
+        # Make it adaptable to FNO, FNO_pad, and SongUNO based on configuration and available models
+        # The surrogate_type config option allows switching between different surrogate types
+        surrogate_type = config.get("guidance", {}).get("surrogate_type", "auto")  # Look in guidance section, default to auto-detection for backward compatibility
+        print(f"Using surrogate_type: {surrogate_type}")
+
+        # Auto-detect the best available model if surrogate_type is "auto"
+        if surrogate_type.lower() == "auto":
+            # Check for available models in order of preference
+            if f"generation/uno_trained_forward_{config['dataset']}.pth" in os.listdir("generation"):
+                surrogate_type = "uno"
+                print("Auto-detected SongUNO surrogate model")
+            elif f"generation/fno_pad_trained_forward_{config['dataset']}.pth" in os.listdir("generation"):
+                surrogate_type = "fno_pad"
+                print("Auto-detected FNO_pad surrogate model")
+            elif f"generation/fno_trained_forward_{config['dataset']}.pth" in os.listdir("generation"):
+                surrogate_type = "fno"
+                print("Auto-detected FNO surrogate model")
+            else:
+                surrogate_type = "fno"  # Default fallback
+                print("No specific model found, defaulting to FNO")
+        
+        if surrogate_type.lower() == "uno":
+            # Initialize UNO surrogate with optimal configuration from training_fno.py
+            self.surrogate = SongUNOWrapper(
+                img_resolution=64,
+                in_channels=1,
+                out_channels=1,
+                fmult=0.5,
+                rank=0.15,  # Slightly increased from 0.1 for better expressiveness
+                model_channels=64,  # Increased from 64 to 68 for ~1.5x parameters
+                channel_mult=[1, 2, 2],  # Keep original for controlled growth
+                num_blocks=2,  # Keep original for controlled growth
+                attn_resolutions=[16],
+                dropout=0.10,
+                cond=False,
+            )
+            model_path = f"generation/uno_trained_forward_{config['dataset']}.pth"
+        elif surrogate_type.lower() == "fno_pad":
+            # Initialize FNO_pad surrogate (recommended for Helmholtz equation)
+            self.surrogate = FNO_pad(
+                n_modes=(64, 64),
+                in_channels=1,
+                out_channels=1,
+                hidden_channels=64,
+                n_layers=4
+            )
+            model_path = f"generation/fno_pad_trained_forward_{config['dataset']}.pth"
+        else:
+            # Default to FNO surrogate
+            self.surrogate = FNO(
+                n_modes=(64, 64),
+                in_channels=1,
+                out_channels=1,
+                hidden_channels=64,
+                n_layers=4
+            )
+            model_path = f"generation/fno_trained_forward_{config['dataset']}.pth"
+        
+        # Load trained forward surrogate
+        try:
+            # Check if weights_only is supported (PyTorch >= 1.13.0)
+            if hasattr(torch, '__version__') and torch.__version__ >= '1.13.0':
+                state_dict = torch.load(model_path, weights_only=True)
+            else:
+                state_dict = torch.load(model_path)
+        except Exception:
+            state_dict = torch.load(model_path)
+        
+        self.surrogate.load_state_dict(state_dict)
+        self.surrogate.to(self.device)
+        self.surrogate.eval()
+        self.surrogate.requires_grad_(False)  # freeze weights; gradients still flow to inputs
 
     def load_data(self):
         super().load_data()
@@ -81,13 +170,13 @@ class PDESolverDPS(PDESolver):
 
             # Concatenate into two channel
             if x_N.shape[1] == 1:
-                # Predict the second channel using the FNO surrogate
-                # Make sure x_N is the correct dtype and device for the FNO surrogate
+                # Predict the second channel using the surrogate
+                # Make sure x_N is the correct dtype and device for the surrogate
                 device = x_N.device
-                self.fno_surrogate = self.fno_surrogate.to(device)
+                self.surrogate = self.surrogate.to(device)
                 x_N = x_N.to(dtype=torch.float32, device=device)
-                # Call FNO surrogate WITHOUT torch.no_grad()
-                sol_pred = self.fno_surrogate(x_N)  # This will be tracked by autograd
+                # Call surrogate WITHOUT torch.no_grad()
+                sol_pred = self.surrogate(x_N)  # This will be tracked by autograd
                 # Concatenate along channel dimension
                 x_N = torch.cat([x_N, sol_pred], dim=1)  # [batch, 2, H, W]
                 
@@ -161,11 +250,11 @@ class PDESolverDPS(PDESolver):
         x_final = x_next.detach()
 
         if x_final.shape[1] == 1:
-            # Predict the second channel using the FNO surrogate
+            # Predict the second channel using the surrogate
             device = x_final.device
             x_final = x_final.to(dtype=torch.float32, device=device)
-            self.fno_surrogate = self.fno_surrogate.to(device)
-            sol_pred = self.fno_surrogate(x_final)
+            self.surrogate = self.surrogate.to(device)
+            sol_pred = self.surrogate(x_final)
             x_final = torch.cat([x_final, sol_pred], dim=1)  # [batch, 2, H, W]
             
         pred = self.normalizer.transform(x_final, denormalize=True)
