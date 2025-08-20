@@ -28,7 +28,11 @@ class PDESolver:
         self.cnt_result_plots = 0
         self.cnt_process_plots = 0
         self.cnt_losses_plots = 0
+        self.cnt_spectral_plots = 0
         self.n_process_steps = self.config["n_process_steps"]
+
+        # Configuration for spectral energy plotting (default to True for backward compatibility)
+        self.plot_spectral_energy_enabled = self.config.get("plot_spectral_energy", True)
         self.save_indices = np.linspace(0, self.num_steps - 1, self.n_process_steps, dtype=int)
         self.observations = [get_observation_class(c, self.config["dataset"]) for c in self.config["observation"]]
 
@@ -105,6 +109,8 @@ class PDESolver:
 
             self.save_results(pred, f"{self.save_dir}/results/batch_{i}.npy")
             self.plot_results(pred, gt, metrics, self.save_dir)
+            if self.plot_spectral_energy_enabled:
+                self.plot_spectral_energy(pred, gt, self.save_dir)
             if "loss_history" in aux:
                 self.plot_losses(aux["loss_history"], self.save_dir)
             if "intermediates" in aux and "intermediates_channel_index" in aux:
@@ -126,7 +132,7 @@ class PDESolver:
             dict: Dictionary containing metrics for each channel
         """
         from .loss import sobolev_h1_loss
-        
+
         metrics = {}
         batch_size, n_channels = pred.shape[:2]
 
@@ -144,7 +150,7 @@ class PDESolver:
                 # Calculate relative error (L2 norm)
                 relative_error = torch.norm(pred_c - gt_c, p=2, dim=(1, 2)) / torch.norm(gt_c, p=2, dim=(1, 2))
                 metrics[f"rel_error_channel{c}"] = relative_error
-                
+
                 # Calculate Sobolev H1 loss
                 error_field = pred_c - gt_c
                 n_obs = error_field.shape[-1] * error_field.shape[-2]  # resolution^2
@@ -361,6 +367,106 @@ class PDESolver:
             print(f"Saved complete metrics to: {output_path}")
 
         return final_stats
+
+    def compute_spectral_energy(self, field):
+        """Compute the power spectral density of a 2D field using FFT.
+
+        Args:
+            field (np.ndarray): 2D field array [height, width]
+
+        Returns:
+            tuple: (frequencies, power_spectral_density)
+                - frequencies: 1D array of wave numbers
+                - power_spectral_density: 1D array of spectral energy values
+        """
+        # Compute 2D FFT
+        fft_field = np.fft.fft2(field)
+
+        # Compute power spectral density
+        power_spectrum = np.abs(fft_field) ** 2
+
+        # Get field dimensions
+        ny, nx = field.shape
+
+        # Create frequency grids
+        kx = np.fft.fftfreq(nx, d=1.0)
+        ky = np.fft.fftfreq(ny, d=1.0)
+        kx_grid, ky_grid = np.meshgrid(kx, ky)
+
+        # Compute radial wave number
+        k_radial = np.sqrt(kx_grid**2 + ky_grid**2)
+
+        # Define radial bins for averaging based on actual frequency range
+        # Note: fftfreq returns normalized frequencies in [-0.5, 0.5), so k_max ≈ 0.707 for square grids
+        k_max = np.max(k_radial)  # Maximum frequency magnitude
+        n_bins = min(nx, ny) // 2  # Number of bins
+        k_bins = np.linspace(0, k_max, n_bins + 1)
+        k_centers = (k_bins[1:] + k_bins[:-1]) / 2
+
+        # Radially average the power spectrum
+        power_radial = np.zeros(len(k_centers))
+        for i, k_center in enumerate(k_centers):
+            # Find pixels within this radial bin
+            mask = (k_radial >= k_bins[i]) & (k_radial < k_bins[i + 1])
+            if np.any(mask):
+                power_radial[i] = np.mean(power_spectrum[mask])
+
+        return k_centers, power_radial
+
+    def plot_spectral_energy(self, pred, gt, save_dir):
+        """Plot spectral energy comparison between predicted and ground truth fields.
+
+        Args:
+            pred (torch.Tensor): Predicted tensor [batch_size, channels, height, width]
+            gt (torch.Tensor): Ground truth tensor [batch_size, channels, height, width]
+            save_dir (str): Directory to save the plot
+        """
+        if self.cnt_spectral_plots >= self.n_plots:
+            return
+
+        pred = pred.detach().cpu().numpy()
+        gt = gt.detach().cpu().numpy()
+        batch_size, n_channels = pred.shape[:2]
+
+        for batch_idx in range(batch_size):
+            # Create figure with subplots for each channel
+            fig, axes = plt.subplots(1, n_channels, figsize=(6 * n_channels, 5), squeeze=False)
+            fig.suptitle("Spectral Energy Comparison", fontsize=16)
+
+            for c in range(n_channels):
+                ax = axes[0, c]
+
+                # Get data for this channel and batch
+                pred_field = pred[batch_idx, c]
+                gt_field = gt[batch_idx, c]
+
+                # Compute spectral energy for both fields
+                k_pred, power_pred = self.compute_spectral_energy(pred_field)
+                k_gt, power_gt = self.compute_spectral_energy(gt_field)
+
+                # Plot on log-log scale
+                ax.loglog(k_pred, power_pred, "r-", label="Predicted", linewidth=2, alpha=0.8)
+                ax.loglog(k_gt, power_gt, "b-", label="Ground Truth", linewidth=2, alpha=0.8)
+
+                ax.set_xlabel("Wave number k")
+                ax.set_ylabel("Power Spectral Density")
+                ax.set_title(f"Channel {c}")
+                ax.legend()
+                ax.grid(True, alpha=0.3)
+
+                # Add some statistics
+                # Compute relative error in spectral energy
+                if len(k_pred) == len(k_gt):
+                    spectral_error = np.mean(np.abs(power_pred - power_gt) / (power_gt + 1e-10))
+                    print(f"Spectral Rel. Error: {spectral_error:.3f}")
+
+            plt.tight_layout()
+            plt.savefig(f"{save_dir}/spectral_energy_{batch_idx}.png", dpi=300, bbox_inches="tight")
+            plt.close()
+
+            self.cnt_spectral_plots += 1
+            if self.cnt_spectral_plots >= self.n_plots:
+                break
 
     def save_results(self, pred, save_path):
         """Save results to disk.

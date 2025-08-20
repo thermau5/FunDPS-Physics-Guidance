@@ -89,4 +89,5 @@ guidance:
 # I/O-related
 n_plots: 4  # number of samples to plot
 n_process_steps: 10  # number of steps to plot process
+plot_spectral_energy: true  # enable spectral energy plots comparing predicted vs ground truth
 wandb: "offline"

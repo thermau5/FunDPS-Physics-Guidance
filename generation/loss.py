@@ -31,14 +31,14 @@ def huber_loss(x, n_obs, delta=1.0) -> torch.Tensor:
 
 
 def sobolev_h1_loss(x, n_obs) -> torch.Tensor:
-    l2_sq_sum = torch.sum(x**2, dim=(-2, -1))   # L2 part: ||x||²
+    l2_sq_sum = torch.sum(x**2, dim=(-2, -1))  # L2 part: |x|²
 
-    grads = torch.gradient(x, dim=(-2, -1))     # ∂x/∂ last 2 dims
-    total_grad_sq_sum = torch.sum(grads[0]**2, dim=(-2, -1)) + torch.sum(grads[1]**2, dim=(-2, -1))
-    
-    total_sq = l2_sq_sum + total_grad_sq_sum    # grad terms
+    grads = torch.gradient(x, dim=(-2, -1))  # ∂/∂x last 2 dims
+    total_grad_sq_sum = torch.sum(grads[0] ** 2, dim=(-2, -1)) + torch.sum(grads[1] ** 2, dim=(-2, -1))
+
+    total_sq = l2_sq_sum + total_grad_sq_sum  # grad terms
     return torch.sqrt(total_sq / n_obs)
-    
+
 
 def get_loss_func(loss_type):
     if loss_type == "mse":
