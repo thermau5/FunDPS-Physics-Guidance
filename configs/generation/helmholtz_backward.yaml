@@ -28,12 +28,12 @@ observation:
     loss_type: "l1"  # mse, l1, l2, huber, or sobolev_h1
     known_indices: [500, 500]
     normalize: true
-  - type: "pde"
-    loss_type: "huber"
-    derivative_method: "finite_diff"
-  - type: "fno"
-    loss_type: "mse"
-    normalize: true
+  # - type: "pde"
+  #   loss_type: "huber"
+  #   derivative_method: "finite_diff"
+  # - type: "fno"
+  #   loss_type: "mse"
+  #   normalize: true
 
 # Guidance options
 # guidance:
