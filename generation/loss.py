@@ -30,6 +30,16 @@ def huber_loss(x, n_obs, delta=1.0) -> torch.Tensor:
     return torch.sum(torch.where(abs_x < delta, 0.5 * abs_x**2, delta * (abs_x - 0.5 * delta)), dim=(-2, -1)) / n_obs
 
 
+def sobolev_h1_loss(x, n_obs) -> torch.Tensor:
+    l2_sq_sum = torch.sum(x**2, dim=(-2, -1))   # L2 part: ||x||²
+
+    grads = torch.gradient(x, dim=(-2, -1))     # ∂x/∂ last 2 dims
+    total_grad_sq_sum = torch.sum(grads[0]**2, dim=(-2, -1)) + torch.sum(grads[1]**2, dim=(-2, -1))
+    
+    total_sq = l2_sq_sum + total_grad_sq_sum    # grad terms
+    return torch.sqrt(total_sq / n_obs)
+    
+
 def get_loss_func(loss_type):
     if loss_type == "mse":
         return mse_loss
@@ -39,6 +49,8 @@ def get_loss_func(loss_type):
         return l2_loss
     elif loss_type == "batched":
         return batched_loss
+    elif loss_type == "sobolev_h1":
+        return sobolev_h1_loss
     elif loss_type.startswith("huber"):
         delta = float(loss_type.split("-")[1]) if "-" in loss_type else 1.0
         return lambda x, n_obs: huber_loss(x, n_obs, delta=delta)

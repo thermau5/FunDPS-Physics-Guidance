@@ -125,6 +125,8 @@ class PDESolver:
         Returns:
             dict: Dictionary containing metrics for each channel
         """
+        from .loss import sobolev_h1_loss
+        
         metrics = {}
         batch_size, n_channels = pred.shape[:2]
 
@@ -137,10 +139,20 @@ class PDESolver:
                 gt_c = torch.round(gt_c)
                 error = 1 - torch.sum(pred_c == gt_c, dim=(1, 2)) / (pred_c.shape[-1] * pred_c.shape[-2])
                 metrics[f"error_rate_channel{c}"] = error
-            # For continuous fields, use relative error
+            # For continuous fields, use relative error and Sobolev H1 loss
             else:
+                # Calculate relative error (L2 norm)
                 relative_error = torch.norm(pred_c - gt_c, p=2, dim=(1, 2)) / torch.norm(gt_c, p=2, dim=(1, 2))
                 metrics[f"rel_error_channel{c}"] = relative_error
+                
+                # Calculate Sobolev H1 loss
+                error_field = pred_c - gt_c
+                n_obs = error_field.shape[-1] * error_field.shape[-2]  # resolution^2
+                sobolev_h1_error = sobolev_h1_loss(error_field, n_obs)
+                # Normalize by the Sobolev H1 norm of the ground truth
+                gt_sobolev_norm = sobolev_h1_loss(gt_c, n_obs)
+                relative_sobolev_error = sobolev_h1_error / (gt_sobolev_norm + 1e-8)  # Add small epsilon to avoid division by zero
+                metrics[f"sobolev_h1_error_channel{c}"] = relative_sobolev_error
 
         return metrics
 

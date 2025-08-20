@@ -8,14 +8,14 @@ data_path: 'data/DiffPDE/poisson_test_hf'
 data_offset: null
 resolution: 128  # downsampled resolution, defaults to dataset resolution
 max_size: null  # maximum number of samples to use, defaults to one epoch
-batch_size: 8
+batch_size: 12
 
 # Model options
 pkl_path: '__required__'
 rbf_scale: 0.05
 
 # Generation options
-seed: null #1568312476
+seed: 1999870123 # 1925618564 #1568312476
 init_latents: "rbf"  # rbf or white_noise
 iterations: 500
 sigma_min: 0.002
@@ -25,26 +25,26 @@ rho: 7
 # Loss options
 observation: 
   - type: "sparse"
-    loss_type: "mse"  # mse, l1, l2, or huber
+    loss_type: "l1"  # mse, l1, l2, huber, or sobolev_h1
     known_indices: [500, 500]
     normalize: true
-  - type: "pde"
-    loss_type: "huber"
-    derivative_method: "finite_diff"
-  - type: "fno"
-    loss_type: "mse"
-    normalize: true
+  # - type: "pde"
+  #   loss_type: "huber"
+  #   derivative_method: "finite_diff"
+  # - type: "fno"
+  #   loss_type: "mse"
+  #   normalize: true
 
 # Guidance options
 # guidance:
 #   type: "dps"
-#   surrogate_type: "fno" # fno, fno_pad, uno
-#   weights: [0, 4000, 0, 0]
+#   surrogate_type: "fno_pad" # fno, fno_pad, uno
+#   weights: [0, 10000, 0, 0] # 20000 is best for FunDPS. 4000 is best for F-1+DPS
 guidance:
   type: "daps"
-  surrogate_type: "fno" # fno, fno_pad, uno
+  surrogate_type: "fno_pad" # fno, fno_pad, uno
   annealing:
-    num_steps: 200
+    num_steps: 100
     sigma_max: 10
     sigma_min: 0.01
     sigma_final: 0
@@ -55,19 +55,19 @@ guidance:
     sigma_final: 0
     rho: 7
   langevin:
-    num_steps: 10
+    num_steps: 50 #Best: 0.1759. 100 langevin steps, 100 annealing steps, weights: 150, sigma_max: 10, lr_min_ratio: 0.01.
     lr: 1.0e-4
     lr_min_ratio: 0.01
     lr_rho: 1
     eta: 0.1  # noise level
     tau: 0.001  # the inverse of observation importance
-    weights: [0, 150, 0, 0]
+    weights: [0, 20]
 # guidance:
 #   type: "daps_zero"
 #   surrogate_type: "fno_pad" # fno, fno_pad, uno
 #   annealing:
-#     num_steps: 200
-#     sigma_max: 10
+#     num_steps: 100
+#     sigma_max: 1
 #     sigma_min: 0.01
 #     sigma_final: 0
 #     rho: 7
@@ -76,14 +76,14 @@ guidance:
 #     sigma_min: 0.001
 #     sigma_final: 0
 #     rho: 7
-#   langevin: # Best: 0.2252. Fno_pad with 100 steps, 100 weights
+#   langevin: # Best: 0.1682. Fno_pad with 100 annealing steps, 100 langevin steps, weights: 200, sigma_max: 1, lr_min_ratio: 0.2
 #     num_steps: 100
 #     lr: 1.0e-4
-#     lr_min_ratio: 0.01
+#     lr_min_ratio: 0.2
 #     lr_rho: 1
 #     eta: 0.1  # noise level
 #     tau: 0.001  # the inverse of observation importance
-#     weights: [0, 150, 0, 0]
+#     weights: [0, 200, 0, 0]
 
 
 # I/O-related
