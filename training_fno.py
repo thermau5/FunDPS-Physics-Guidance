@@ -1,4 +1,4 @@
-#%%
+# %%
 import warnings
 
 # Suppress PyTorch deprecation warnings about multidimensional indexing
@@ -12,6 +12,7 @@ from torch.utils.data import TensorDataset, DataLoader
 import matplotlib.pyplot as plt
 from neuralop.models.fno import FNO
 from training.networks import SongUNO
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
@@ -19,29 +20,31 @@ print(f"Using device: {device}")
 class FNO_pad(FNO):
     def forward(self, x):
         res_2 = x.shape[-1] // 2
-        x = F.pad(x, (res_2, res_2, res_2, res_2), mode='reflect')
+        x = F.pad(x, (res_2, res_2, res_2, res_2), mode="reflect")
         ret = super().forward(x)
         ret = ret[:, :, res_2:-res_2, res_2:-res_2]
         return ret
+
 
 # Wrapper class to make SongUNO compatible with direct forward prediction
 class SongUNOWrapper(torch.nn.Module):
     def __init__(self, *args, **kwargs):
         super().__init__()
         self.model = SongUNO(*args, **kwargs)
-        
+
     def forward(self, x):
         # Create dummy noise_labels and class_labels for training
         batch_size = x.shape[0]
         device = x.device
-        
+
         # Create dummy noise_labels (timestep 0 for deterministic prediction)
         noise_labels = torch.zeros(batch_size, device=device)
-        
+
         # Create dummy class_labels (unconditional)
         class_labels = torch.zeros(batch_size, 0, device=device)  # Empty class labels
-        
+
         return self.model(x, noise_labels, None)
+
 
 # ============================================================
 # 1. DATA LOADING & VISUALIZATION
@@ -50,18 +53,18 @@ import numpy as np
 from scipy.io import loadmat
 from training.dataset_hf import PDEDataset
 
-pde_direction = 'forward'  # or 'inverse', depending on the dataset
-dataset_name = 'poisson'  # Name of the dataset for saving/loading models
+pde_direction = "forward"  # or 'inverse', depending on the dataset
+dataset_name = "poisson"  # Name of the dataset for saving/loading models
 
 # === Batch size configuration ===
 batch_size = 25  # Increased from default 1 to 64 for better GPU utilization
 
 # === Load training data ===
-train_dataset = PDEDataset(path=f'data/DiffPDE/{dataset_name}_hf', resolution=128)
+train_dataset = PDEDataset(path=f"data/DiffPDE/{dataset_name}_hf", resolution=128)
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
 # === Load testing data ===
-test_dataset = PDEDataset(path=f'data/DiffPDE/{dataset_name}_test_hf', resolution=128)
+test_dataset = PDEDataset(path=f"data/DiffPDE/{dataset_name}_test_hf", resolution=128)
 test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
 
@@ -154,18 +157,12 @@ test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 #     visualize_sample_or_pred(input_field, ground_truth_field, model=None, device=device, visualize_pred=False)
 
 
-#%%
+# %%
 # ============================================================
 # 2. MODEL ARCHITECTURE (CNN ENCODER-DECODER) vs. FOURIER NEURAL OPERATOR (FNO) MODEL
 # ============================================================
 
-model = FNO_pad(
-    n_modes=(64, 64),
-    in_channels=1,      # scalar input
-    out_channels=1,     # scalar output
-    hidden_channels=64,
-    n_layers=4
-)
+model = FNO_pad(n_modes=(64, 64), in_channels=1, out_channels=1, hidden_channels=64, n_layers=4)  # scalar input  # scalar output
 
 # model = SongUNOWrapper(
 #     img_resolution=64,
@@ -191,6 +188,7 @@ print(f"Number of parameters in the model: {sum(p.numel() for p in model.paramet
 # 3. LOSS FUNCTION (L2 LOSS)
 # ============================================================
 
+
 class L2Loss(object):
     def __init__(self):
         super(L2Loss, self).__init__()
@@ -200,6 +198,7 @@ class L2Loss(object):
         diff_norms = torch.norm(x.reshape(num_examples, -1) - y.reshape(num_examples, -1), 2, 1)
         y_norms = torch.norm(y.reshape(num_examples, -1), 2, 1)
         return torch.sum(diff_norms / y_norms)
+
 
 # ============================================================
 # 4. TRAINING LOOP
@@ -231,20 +230,20 @@ warmup_times = []
 for i, (warmup_data, _) in enumerate(train_loader):
     if i >= warmup_batches:
         break
-    
+
     warmup_start = time.time()
     warmup_data = warmup_data.to(device).float()
-    if pde_direction == 'forward':
+    if pde_direction == "forward":
         inputs, targets = warmup_data[:, 0:1, :, :], warmup_data[:, 1:2, :, :]
-    elif pde_direction == 'inverse':
+    elif pde_direction == "inverse":
         inputs, targets = warmup_data[:, 1:2, :, :], warmup_data[:, 0:1, :, :]
-    
+
     outputs = model(inputs)
     loss = criterion(outputs, targets)
     loss.backward()
     optimizer.step()
     optimizer.zero_grad()
-    
+
     warmup_time = time.time() - warmup_start
     warmup_times.append(warmup_time)
     print(f"  Warmup batch {i+1}: {warmup_time:.3f}s")
@@ -265,20 +264,19 @@ for epoch in range(num_epochs):
     model.train()
     running_loss = 0.0
     batch_losses = []
-    
+
     print(f"\nEpoch {epoch+1}/{num_epochs} - Starting...")
-    
+
     # Create progress bar for this epoch
-    pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", 
-                leave=False, ncols=120)
-    
+    pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False, ncols=120)
+
     for batch_idx, (train_data, _) in enumerate(pbar):
         batch_start_time = time.time()
-        
+
         train_data = train_data.to(device).float()
-        if pde_direction == 'forward':
+        if pde_direction == "forward":
             inputs, ground_truths = train_data[:, 0:1, :, :], train_data[:, 1:2, :, :]
-        elif pde_direction == 'inverse':
+        elif pde_direction == "inverse":
             inputs, ground_truths = train_data[:, 1:2, :, :], train_data[:, 0:1, :, :]
 
         # Zero the gradients
@@ -297,12 +295,12 @@ for epoch in range(num_epochs):
         # Accumulate loss
         running_loss += loss.item()
         batch_losses.append(loss.item())
-        
+
         # Update progress bar with current loss and ETA
         if len(batch_losses) > 0:
             current_loss = batch_losses[-1]
             avg_loss = sum(batch_losses) / len(batch_losses)
-            
+
             # Memory usage for progress bar
             if torch.cuda.is_available():
                 gpu_memory = torch.cuda.memory_allocated(device) / 1024**3
@@ -310,19 +308,15 @@ for epoch in range(num_epochs):
             else:
                 process = psutil.Process(os.getpid())
                 memory_str = f"RAM:{process.memory_info().rss / 1024**3:.1f}GB"
-            
-            pbar.set_postfix({
-                'Loss': f'{current_loss:.4f}',
-                'Avg': f'{avg_loss:.4f}',
-                'Mem': memory_str
-            })
-        
+
+            pbar.set_postfix({"Loss": f"{current_loss:.4f}", "Avg": f"{avg_loss:.4f}", "Mem": memory_str})
+
         # Detailed progress update every N batches for console output
         N_batches_to_report = total_batches // 5
         if (batch_idx + 1) % N_batches_to_report == 0 or (batch_idx + 1) == total_batches:
             batch_time = time.time() - batch_start_time
             avg_batch_loss = sum(batch_losses[-20:]) / min(20, len(batch_losses[-20:]))
-            
+
             # Memory usage
             if torch.cuda.is_available():
                 gpu_memory = torch.cuda.memory_allocated(device) / 1024**3  # GB
@@ -331,29 +325,25 @@ for epoch in range(num_epochs):
             else:
                 process = psutil.Process(os.getpid())
                 memory_info = f"RAM: {process.memory_info().rss / 1024**3:.2f}GB"
-            
+
             progress = (batch_idx + 1) / total_batches * 100
             eta_epoch = batch_time * (total_batches - batch_idx - 1)
-            
-            print(f"\nBatch {batch_idx+1:3d} ({progress:3.1f}%) | "
-                  f"Loss: {avg_batch_loss:.4f} | "
-                  f"Batch time: {batch_time:.3f}s | "
-                  f"ETA epoch: {eta_epoch:.1f}s | "
-                  f"{memory_info}")
-    
+
+            print(f"\nBatch {batch_idx+1:3d} ({progress:3.1f}%) | " f"Loss: {avg_batch_loss:.4f} | " f"Batch time: {batch_time:.3f}s | " f"ETA epoch: {eta_epoch:.1f}s | " f"{memory_info}")
+
     pbar.close()
 
     # Epoch summary
     epoch_time = time.time() - epoch_start_time
     epoch_loss = running_loss / len(train_dataset)
     avg_batch_loss = sum(batch_losses) / len(batch_losses)
-    
+
     print(f"\nEpoch {epoch+1}/{num_epochs} Summary:")
     print(f"  Training Loss: {epoch_loss:.6f}")
     print(f"  Average Batch Loss: {avg_batch_loss:.6f}")
     print(f"  Epoch Time: {epoch_time:.2f}s")
     print(f"  Time per batch: {epoch_time/total_batches:.3f}s")
-    
+
     # Memory summary
     if torch.cuda.is_available():
         gpu_memory = torch.cuda.memory_allocated(device) / 1024**3
@@ -362,19 +352,19 @@ for epoch in range(num_epochs):
     else:
         process = psutil.Process(os.getpid())
         print(f"  RAM Usage: {process.memory_info().rss / 1024**3:.2f}GB")
-    
+
     print("-" * 80)
 
 torch.save(model.state_dict(), f"generation/fno_pad_trained_{pde_direction}_{dataset_name}.pth")
 
-#%%
+# %%
 # ============================================================
 # 5. EVALUATION ON TEST DATA
 # ============================================================
 
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("EVALUATION ON TEST DATA")
-print("="*80)
+print("=" * 80)
 
 model.eval()
 test_loss = 0.0
@@ -384,27 +374,27 @@ print(f"Testing on {len(test_dataset)} samples in {test_batches} batches")
 with torch.no_grad():
     # Create progress bar for testing
     test_pbar = tqdm(test_loader, desc="Testing", leave=False, ncols=120)
-    
+
     for batch_idx, (test_data, _) in enumerate(test_pbar):
         test_data = test_data.to(device).float()
-        if pde_direction == 'forward':
+        if pde_direction == "forward":
             inputs, ground_truths = test_data[:, 0:1, :, :], test_data[:, 1:2, :, :]
-        elif pde_direction == 'inverse':
+        elif pde_direction == "inverse":
             inputs, ground_truths = test_data[:, 1:2, :, :], test_data[:, 0:1, :, :]
 
         # Forward pass
         outputs = model(inputs)
         loss = criterion(outputs, ground_truths)
         test_loss += loss.item()
-        
+
         # Update progress bar
-        test_pbar.set_postfix({'Loss': f'{loss.item():.4f}'})
-    
+        test_pbar.set_postfix({"Loss": f"{loss.item():.4f}"})
+
     test_pbar.close()
 
 test_loss /= len(test_dataset)
 print(f"\nFinal Test Loss: {test_loss:.6f}")
-print("="*80)
+print("=" * 80)
 
 # === Visualize predictions ===
 # print("Visualizing testing predictions:")
