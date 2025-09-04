@@ -41,6 +41,130 @@ class SongUNOWrapper(torch.nn.Module):
         return self.model(x, noise_labels, None)
 
 
+def compute_dynamic_langevin_steps(annealing_step, total_annealing_steps, base_langevin_steps, 
+                                  decay_type="exponential", decay_rate=0.5, min_steps=1):
+    """
+    Compute the number of Langevin steps dynamically based on the annealing step.
+    
+    Args:
+        annealing_step (int): Current annealing step (0-indexed)
+        total_annealing_steps (int): Total number of annealing steps
+        base_langevin_steps (int): Base number of Langevin steps (at step 0)
+        decay_type (str): Type of decay function ("exponential", "linear", "polynomial", "step", "sigmoid", "increasing")
+        decay_rate (float): Decay rate parameter (0-1) or increase multiplier for "increasing"
+        min_steps (int): Minimum number of Langevin steps
+    
+    Returns:
+        int: Number of Langevin steps for the current annealing step
+    """
+    if annealing_step >= total_annealing_steps:
+        return min_steps
+    
+    # Normalize step to [0, 1]
+    step_ratio = annealing_step / total_annealing_steps
+    
+    if decay_type == "exponential":
+        # Exponential decay: steps = base_steps * (decay_rate ^ step_ratio)
+        steps = int(base_langevin_steps * (decay_rate ** step_ratio))
+    elif decay_type == "linear":
+        # Linear decay: steps = base_steps * (1 - step_ratio * (1 - decay_rate))
+        steps = int(base_langevin_steps * (1 - step_ratio * (1 - decay_rate)))
+    elif decay_type == "polynomial":
+        # Polynomial decay: steps = base_steps * (1 - step_ratio^2 * (1 - decay_rate))
+        steps = int(base_langevin_steps * (1 - step_ratio**2 * (1 - decay_rate)))
+    elif decay_type == "sigmoid":
+        # Sigmoid decay: slow at start and end, faster in middle
+        # Use sigmoid function: 1 / (1 + exp(-k * (x - 0.5))) where k controls steepness
+        k = 6  # Controls steepness of sigmoid (higher = steeper)
+        sigmoid = 1 / (1 + np.exp(-k * (step_ratio - 0.5)))
+        # Map sigmoid [0,1] to [1, decay_rate]
+        steps = int(base_langevin_steps * (1 - sigmoid * (1 - decay_rate)))
+    elif decay_type == "increasing":
+        # Increasing steps: start with fewer steps, increase as annealing progresses
+        # Use sigmoid function to control the increase: 1 / (1 + exp(-k * (x - 0.5)))
+        k = 5  # Controls steepness of sigmoid (higher = steeper)
+        sigmoid = 1 / (1 + np.exp(-k * (step_ratio - 0.5)))
+        # Map sigmoid [0,1] to [min_steps/base_steps, decay_rate] where decay_rate is the max multiplier
+        min_ratio = min_steps / base_langevin_steps
+        steps = int(base_langevin_steps * (min_ratio + sigmoid * (decay_rate - min_ratio)))
+    elif decay_type == "step":
+        # Step decay: reduce steps at specific thresholds
+        if step_ratio < 0.3:
+            steps = base_langevin_steps
+        elif step_ratio < 0.6:
+            steps = int(base_langevin_steps * 0.7)
+        elif step_ratio < 0.8:
+            steps = int(base_langevin_steps * 0.4)
+        else:
+            steps = int(base_langevin_steps * 0.2)
+    else:
+        raise ValueError(f"Unknown decay_type: {decay_type}")
+    
+    # print(f"Langevin steps: {steps}")
+    return max(steps, min_steps)
+
+
+def compute_dynamic_learning_rate(annealing_step, total_annealing_steps, base_lr, 
+                                 lr_schedule="warmup_decay", lr_decay_rate=0.3, 
+                                 lr_min_ratio=0.01, lr_warmup_steps=10):
+    """
+    Compute the learning rate dynamically based on the annealing step.
+    
+    Args:
+        annealing_step (int): Current annealing step (0-indexed)
+        total_annealing_steps (int): Total number of annealing steps
+        base_lr (float): Base learning rate (at step 0)
+        lr_schedule (str): Type of learning rate schedule ("exponential", "linear", "polynomial", "cosine", "sigmoid", "warmup_decay")
+        lr_decay_rate (float): Learning rate decay rate (0-1)
+        lr_min_ratio (float): Minimum learning rate ratio relative to base_lr
+        lr_warmup_steps (int): Number of warmup steps (learning rate increases then decreases)
+    
+    Returns:
+        float: Learning rate for the current annealing step
+    """
+    if annealing_step >= total_annealing_steps:
+        return base_lr * lr_min_ratio
+    
+    # Normalize step to [0, 1]
+    step_ratio = annealing_step / total_annealing_steps
+    
+    if lr_schedule == "exponential":
+        # Exponential decay: lr = base_lr * (lr_decay_rate ^ step_ratio)
+        lr = base_lr * (lr_decay_rate ** step_ratio)
+    elif lr_schedule == "linear":
+        # Linear decay: lr = base_lr * (1 - step_ratio * (1 - lr_decay_rate))
+        lr = base_lr * (1 - step_ratio * (1 - lr_decay_rate))
+    elif lr_schedule == "polynomial":
+        # Polynomial decay: lr = base_lr * (1 - step_ratio^2 * (1 - lr_decay_rate))
+        lr = base_lr * (1 - step_ratio**2 * (1 - lr_decay_rate))
+    elif lr_schedule == "cosine":
+        # Cosine decay: lr = base_lr * (lr_min_ratio + (1 - lr_min_ratio) * 0.5 * (1 + cos(π * step_ratio)))
+        lr = base_lr * (lr_min_ratio + (1 - lr_min_ratio) * 0.5 * (1 + np.cos(np.pi * step_ratio)))
+    elif lr_schedule == "sigmoid":
+        # Sigmoid decay: slow at start and end, faster in middle
+        # Use sigmoid function: 1 / (1 + exp(-k * (x - 0.5))) where k controls steepness
+        k = 6  # Controls steepness of sigmoid (higher = steeper)
+        sigmoid = 1 / (1 + np.exp(-k * (step_ratio - 0.5)))
+        # Map sigmoid [0,1] to [1, lr_decay_rate]
+        lr = base_lr * (1 - sigmoid * (1 - lr_decay_rate))
+    elif lr_schedule == "warmup_decay":
+        # Warmup then decay: increase for warmup_steps, then decrease
+        if annealing_step < lr_warmup_steps:
+            # Warmup phase: increase learning rate
+            warmup_ratio = annealing_step / lr_warmup_steps
+            lr = base_lr * (lr_min_ratio + (1 - lr_min_ratio) * warmup_ratio)
+        else:
+            # Decay phase: decrease learning rate
+            decay_ratio = (annealing_step - lr_warmup_steps) / (total_annealing_steps - lr_warmup_steps)
+            lr = base_lr * (1 - decay_ratio * (1 - lr_decay_rate))
+    else:
+        raise ValueError(f"Unknown lr_schedule: {lr_schedule}")
+    
+    # Ensure learning rate doesn't go below minimum
+    print(f"Learning rate: {lr}")
+    return max(lr, base_lr * lr_min_ratio)
+
+
 class Scheduler(nn.Module):
     """Scheduler for diffusion sigma(t) and discretization step size Delta t"""
 
@@ -153,6 +277,22 @@ class PDESolverDAPS(PDESolver):
         self.langevin_steps = self.langevin_config["num_steps"]
         self.langevin_weights = torch.tensor(self.langevin_config["weights"], device=self.device).view(1, -1)
 
+        # Dynamic Langevin control parameters
+        self.dynamic_langevin = self.langevin_config.get("dynamic_control", False)
+        if self.dynamic_langevin:
+            self.langevin_decay_type = self.langevin_config.get("decay_type", "exponential")
+            self.langevin_decay_rate = self.langevin_config.get("decay_rate", 0.5)
+            self.langevin_min_steps = self.langevin_config.get("min_steps", 1)
+            print(f"Dynamic Langevin control enabled: {self.langevin_decay_type} decay, rate={self.langevin_decay_rate}, min_steps={self.langevin_min_steps}")
+
+        # Dynamic learning rate control parameters
+        self.dynamic_lr = self.langevin_config.get("dynamic_lr", False)
+        if self.dynamic_lr:
+            self.lr_schedule = self.langevin_config.get("lr_schedule", "warmup_decay")
+            self.lr_decay_rate = self.langevin_config.get("lr_decay_rate", 0.3)
+            self.lr_warmup_steps = self.langevin_config.get("lr_warmup_steps", 10)
+            print(f"Dynamic learning rate control enabled: {self.lr_schedule} schedule, decay_rate={self.lr_decay_rate}, warmup_steps={self.lr_warmup_steps}")
+
         # assert self.num_steps == self.annealing_config["num_steps"]
         self.num_steps = self.annealing_config["num_steps"]
         self.save_indices = np.linspace(0, self.num_steps - 1, self.n_process_steps, dtype=int)
@@ -206,8 +346,27 @@ class PDESolverDAPS(PDESolver):
                 n_layers=4
             )
             model_path = f"generation/fno_pad_trained_forward_{config['dataset']}.pth"
+        elif surrogate_type.lower() == "fno_pad_64":
+            self.surrogate = FNO_pad(
+                n_modes=(32, 32),
+                in_channels=1,
+                out_channels=1,
+                hidden_channels=64,
+                n_layers=4
+            )
+            model_path = f"generation/fno_pad_trained_forward_{config['dataset']}_64.pth"
+        elif surrogate_type.lower() == "fno_pad_mix":
+            self.surrogate = FNO_pad(
+                n_modes=(32, 32),
+                in_channels=1,
+                out_channels=1,
+                hidden_channels=64,
+                n_layers=4
+            )
+            model_path = f"generation/fno_pad_trained_forward_{config['dataset']}_mix.pth"
         else:
             # Default to FNO surrogate
+            print("Using Default FNO surrogate")
             self.surrogate = FNO(
                 n_modes=(64, 64),
                 in_channels=1,
@@ -264,8 +423,8 @@ class PDESolverDAPS(PDESolver):
             diffusion_scheduler = Scheduler(**self.diffusion_config, sigma_max=sigma_t)
             x0 = self._reverse_diffusion(xt, diffusion_scheduler)
 
-            # 2. Langevin Dynamics Step
-            x0y = self._langevin_dynamics(x0, observations, sigma_t, step / annealing_scheduler.num_steps)
+            # 2. Langevin Dynamics Step with dynamic control
+            x0y = self._langevin_dynamics(x0, observations, sigma_t, step / annealing_scheduler.num_steps, step)
 
             # 3. Forward Diffusion Step
             xt = x0y + self.noise_sampler.sample(self.batch_size) * sigma_t_next
@@ -334,14 +493,15 @@ class PDESolverDAPS(PDESolver):
 
         return x_cur
 
-    def _langevin_dynamics(self, x0hat: torch.Tensor, observations, sigma, ratio):
-        """Perform Langevin dynamics sampling.
+    def _langevin_dynamics(self, x0hat: torch.Tensor, observations, sigma, ratio, annealing_step):
+        """Perform Langevin dynamics sampling with dynamic step control.
 
         Args:
             x0hat (torch.Tensor): Initial state
             observations (list): List of observation objects
             sigma (float): Current sigma value
             ratio (float): Current step ratio
+            annealing_step (int): Current annealing step for dynamic control
 
         Returns:
             torch.Tensor: Updated state
@@ -353,13 +513,31 @@ class PDESolverDAPS(PDESolver):
         eta = self.langevin_config["eta"]
         tau = self.langevin_config["tau"]
 
-        # Calculate adaptive learning rate
-        multiplier = (1 ** (1 / rho) + ratio * (self.lr_min_ratio ** (1 / rho) - 1 ** (1 / rho))) ** rho
-        current_lr = multiplier * self.lr
+        # Calculate learning rate with dynamic control
+        if self.dynamic_lr:
+            # Use dynamic learning rate control
+            current_lr = compute_dynamic_learning_rate(
+                annealing_step, self.num_steps, self.lr,
+                self.lr_schedule, self.lr_decay_rate, 
+                self.lr_min_ratio, self.lr_warmup_steps
+            )
+        else:
+            # Use original adaptive learning rate
+            multiplier = (1 ** (1 / rho) + ratio * (self.lr_min_ratio ** (1 / rho) - 1 ** (1 / rho))) ** rho
+            current_lr = multiplier * self.lr
+
+        # Dynamic Langevin step control
+        if self.dynamic_langevin:
+            current_langevin_steps = compute_dynamic_langevin_steps(
+                annealing_step, self.num_steps, self.langevin_steps,
+                self.langevin_decay_type, self.langevin_decay_rate, self.langevin_min_steps
+            )
+        else:
+            current_langevin_steps = self.langevin_steps
 
         optimizer = optim.SGD([x], lr=current_lr)
 
-        for _ in range(self.langevin_steps):
+        for _ in range(current_langevin_steps):
             optimizer.zero_grad()
 
             # Compute loss terms
