@@ -7,8 +7,8 @@ dataset: 'helmholtz'
 data_path: 'data/DiffPDE/helmholtz_test_hf'
 data_offset: null
 resolution: 128  # downsampled resolution, defaults to dataset resolution
-max_size: 20  # maximum number of samples to use, defaults to one epoch
-batch_size: 10
+max_size: 12  # maximum number of samples to use, defaults to one epoch
+batch_size: 12
 
 # Model options
 pkl_path: '__required__'
@@ -36,40 +36,46 @@ observation:
   #   normalize: true
 
 # Guidance options
-# guidance:
-#   type: "dps"
-#   surrogate_type: "fno_pad" # fno, fno_pad, uno
-#   weights: [0, 5000, 0, 0] # Default guidance = 5000
 guidance:
-  type: "daps"
+  type: "dps_multires"
   surrogate_type: "fno_pad" # fno, fno_pad, uno
-  annealing:
-    num_steps: 100
-    sigma_max: 10
-    sigma_min: 0.01
-    sigma_final: 0
-    rho: 7
-  diffusion:
-    num_steps: 5
-    sigma_min: 0.001
-    sigma_final: 0
-    rho: 7
-  langevin: # 16.50% with annealing/langevin steps = 100/20, weights = 10
-    num_steps: 20
-    lr: 1.0e-4
-    lr_min_ratio: 0.01
-    lr_rho: 1
-    eta: 0.1  # noise level
-    tau: 0.001  # the inverse of observation importance
-    weights: [0, 10]
-    dynamic_control: False  # Enable dynamic control of Langevin steps
-    decay_type: "linear"  # Options: "exponential", "linear", "polynomial", "step", "sigmoid", "increasing"
-    decay_rate: 1.5 # Increase multiplier (1.5 = 50% more steps at max, more conservative)
-    min_steps: 3  # Higher minimum for better early exploration
-    dynamic_lr: False  # Enable dynamic learning rate control
-    lr_schedule: "sigmoid"  # Options: "exponential", "linear", "polynomial", "cosine", "sigmoid", "warmup_decay"
-    lr_decay_rate: 0.5  # Learning rate decay rate (0-1), lower values = faster decay
-    lr_warmup_steps: 0  # Number of warmup steps (learning rate increases then decreases)
+  weights: [0, 5000, 0, 0] # Default guidance = 5000
+  # Super-resolution guidance
+  sigma_min_1: 0.005
+  sigma_max_2: 5
+  init_resolution: 64
+  upsampling_mode: "bilinear"
+  upsampling_step: 200
+# guidance:
+#   type: "daps"
+#   surrogate_type: "fno_pad" # fno, fno_pad, uno
+#   annealing:
+#     num_steps: 100
+#     sigma_max: 10
+#     sigma_min: 0.01
+#     sigma_final: 0
+#     rho: 7
+#   diffusion:
+#     num_steps: 5
+#     sigma_min: 0.001
+#     sigma_final: 0
+#     rho: 7
+#   langevin: # 16.50% with annealing/langevin steps = 100/20, weights = 10
+#     num_steps: 20
+#     lr: 1.0e-4
+#     lr_min_ratio: 0.01
+#     lr_rho: 1
+#     eta: 0.1  # noise level
+#     tau: 0.001  # the inverse of observation importance
+#     weights: [0, 10]
+#     dynamic_control: False  # Enable dynamic control of Langevin steps
+#     decay_type: "linear"  # Options: "exponential", "linear", "polynomial", "step", "sigmoid", "increasing"
+#     decay_rate: 1.5 # Increase multiplier (1.5 = 50% more steps at max, more conservative)
+#     min_steps: 3  # Higher minimum for better early exploration
+#     dynamic_lr: False  # Enable dynamic learning rate control
+#     lr_schedule: "sigmoid"  # Options: "exponential", "linear", "polynomial", "cosine", "sigmoid", "warmup_decay"
+#     lr_decay_rate: 0.5  # Learning rate decay rate (0-1), lower values = faster decay
+#     lr_warmup_steps: 0  # Number of warmup steps (learning rate increases then decreases)
 # guidance:
 #   type: "daps_zero"
 #   surrogate_type: "fno_pad" # fno, fno_pad, uno
@@ -96,4 +102,5 @@ guidance:
 # I/O-related
 n_plots: 4  # number of samples to plot
 n_process_steps: 10  # number of steps to plot process
+plot_spectral_energy: false  # enable spectral energy plots comparing predicted vs ground truth
 wandb: "offline"

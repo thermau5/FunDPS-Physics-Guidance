@@ -32,7 +32,7 @@ class PDESolver:
         self.n_process_steps = self.config["n_process_steps"]
 
         # Configuration for spectral energy plotting (default to True for backward compatibility)
-        self.plot_spectral_energy_enabled = self.config.get("plot_spectral_energy", True)
+        self.plot_spectral_energy_enabled = self.config.get("plot_spectral_energy", False)
         self.save_indices = np.linspace(0, self.num_steps - 1, self.n_process_steps, dtype=int)
         self.observations = [get_observation_class(c, self.config["dataset"]) for c in self.config["observation"]]
 
@@ -151,14 +151,14 @@ class PDESolver:
                 relative_error = torch.norm(pred_c - gt_c, p=2, dim=(1, 2)) / torch.norm(gt_c, p=2, dim=(1, 2))
                 metrics[f"rel_error_channel{c}"] = relative_error
 
-                # Calculate Sobolev H1 loss
-                error_field = pred_c - gt_c
-                n_obs = error_field.shape[-1] * error_field.shape[-2]  # resolution^2
-                sobolev_h1_error = sobolev_h1_loss(error_field, n_obs)
-                # Normalize by the Sobolev H1 norm of the ground truth
-                gt_sobolev_norm = sobolev_h1_loss(gt_c, n_obs)
-                relative_sobolev_error = sobolev_h1_error / (gt_sobolev_norm + 1e-8)  # Add small epsilon to avoid division by zero
-                metrics[f"sobolev_h1_error_channel{c}"] = relative_sobolev_error
+                # # Calculate Sobolev H1 loss
+                # error_field = pred_c - gt_c
+                # n_obs = error_field.shape[-1] * error_field.shape[-2]  # resolution^2
+                # sobolev_h1_error = sobolev_h1_loss(error_field, n_obs)
+                # # Normalize by the Sobolev H1 norm of the ground truth
+                # gt_sobolev_norm = sobolev_h1_loss(gt_c, n_obs)
+                # relative_sobolev_error = sobolev_h1_error / (gt_sobolev_norm + 1e-8)  # Add small epsilon to avoid division by zero
+                # metrics[f"sobolev_h1_error_channel{c}"] = relative_sobolev_error
 
         return metrics
 

@@ -70,6 +70,11 @@ class FullObservation(Observation):
     def get_observation_loss(self, x_pred):
         if self.to_normalize:
             x_pred = self.normalizer.normalize(x_pred)
+        
+        # Handle multi-resolution: interpolate x_pred to match ground truth resolution
+        if hasattr(self, 'interpolation_mode') and self.interpolation_mode is not None and x_pred.shape[-1] != self.resolution:
+            x_pred = torch.nn.functional.interpolate(x_pred, size=(self.resolution, self.resolution), mode=self.interpolation_mode, align_corners=True)
+        
         return self._calculate_loss(x_pred, self.ground_truth, self.known_indices)
 
 
@@ -127,6 +132,11 @@ class SparseObservation(Observation):
     def get_observation_loss(self, x_pred):
         if self.to_normalize:
             x_pred = self.normalizer.normalize(x_pred)
+        
+        # Handle multi-resolution: interpolate x_pred to match ground truth resolution
+        if hasattr(self, 'interpolation_mode') and self.interpolation_mode is not None and x_pred.shape[-1] != self.resolution:
+            x_pred = torch.nn.functional.interpolate(x_pred, size=(self.resolution, self.resolution), mode=self.interpolation_mode, align_corners=True)
+        
         return self._calculate_loss(x_pred, self.ground_truth, self.known_indices, self.masks)
 
 
@@ -157,6 +167,10 @@ class PDEObservation(Observation):
         Returns:
             torch.Tensor: PDE loss
         """
+        
+        # Handle multi-resolution: interpolate x_pred to match ground truth resolution
+        if hasattr(self, 'interpolation_mode') and self.interpolation_mode is not None and x_pred.shape[-1] != self.resolution:
+            x_pred = torch.nn.functional.interpolate(x_pred, size=(self.resolution, self.resolution), mode=self.interpolation_mode, align_corners=True)
 
         pde_residual = self.pde_residual_func(x_pred)
         n_obs = pde_residual.shape[-1] ** 2
@@ -236,6 +250,10 @@ class FNOObservation(Observation):
     def get_observation_loss(self, x_pred):
         if self.to_normalize:
             x_pred = self.normalizer.normalize(x_pred)
+
+        # Handle multi-resolution: interpolate x_pred to match ground truth resolution
+        if hasattr(self, 'interpolation_mode') and self.interpolation_mode is not None and x_pred.shape[-1] != self.resolution:
+            x_pred = torch.nn.functional.interpolate(x_pred, size=(self.resolution, self.resolution), mode=self.interpolation_mode, align_corners=True)
 
         params     = x_pred[:, 0:1].float()
         sol_target = x_pred[:, 1:2].float()
