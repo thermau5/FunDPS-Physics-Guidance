@@ -12,6 +12,7 @@ from generation.daps import PDESolverDAPS
 from generation.daps_zero import PDESolverDAPSZero
 from generation.dsg import PDESolverDSG
 from generation.dps_multires import PDESolverDPS_MultiRes
+from generation.daps_multires import PDESolverDAPS_MultiRes
 
 
 def get_solver(config):
@@ -27,6 +28,8 @@ def get_solver(config):
         return PDESolverDSG(config)
     elif solver_type == "dps_multires":
         return PDESolverDPS_MultiRes(config)
+    elif solver_type == "daps_multires":
+        return PDESolverDAPS_MultiRes(config)
     else:
         raise ValueError(f"Unknown solver type: {solver_type}")
 
