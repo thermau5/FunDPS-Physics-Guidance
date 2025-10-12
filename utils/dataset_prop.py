@@ -5,13 +5,14 @@ import numpy as np
 import scipy.io as sio
 from tqdm import tqdm
 
-SUPPORTED_DATASETS = ["darcy", "ns-bounded", "ns-nonbounded", "burgers", "helmholtz", "poisson"]
+SUPPORTED_DATASETS = ["darcy", "ns-bounded", "ns-nonbounded", "ns-nonbounded_new", "burgers", "helmholtz", "poisson"]
 
 STATS = {
     "darcy": {"mean": [7.5, 5.69201936e-03], "std": [4.5, 3.79030361e-03], "min": [3.0, -0.28737752], "max": [12.0, 0.11770357]},
     # "ns-bounded": {"mean": [1.80764261, 2.87617294], "std": [1.00978948, 1.7223065], "min": [0.0, 0.0], "max": [10.00000151, 10.00000203]},
     'ns-bounded': {'mean': [1.80715032, 2.87310427], 'std': [1.00997056, 1.72194188], 'min': [0.0, 0.0], 'max': [10.00000151, 10.00000203]}, # 14k, main one!
     "ns-nonbounded": {"mean": [0, 0], "std": [0.26211293, 0.2561266], "min": [-1.3913461, -1.31577837], "max": [1.58353412, 1.4743135]},
+    "ns-nonbounded_new": {"mean": [0, 0], "std": [0.3108158663959656, 0.44934462835786804], "min": [-1.2366968393325806, -1.4219366312026978], "max": [1.328141212463379, 1.4310626983642578]},
     "burgers": {"mean": [0, 0], "std": [0.27366568, 0.20088117], "min": [-1.28759708, -1.28759708], "max": [1.21768836, 1.21768836]},
     "helmholtz": {"mean": [0, 1.05050595e-05], "std": [0.2844538, 0.00428004], "min": [-2.09217139, -0.02734944], "max": [2.13316352, 0.02774104]},
     "poisson": {"mean": [0, 9.67226952e-06], "std": [0.2919494, 0.00417478], "min": [-2.13132663, -0.02657227], "max": [2.16163561, 0.02717429]},
@@ -36,10 +37,18 @@ def load_ns_bounded(file_path):
 
 
 def load_ns_nonbounded(file_path):
-    """Load NS-nonbounded dataset."""
+    """Load NS-nonbounded dataset (old version)."""
     data = sio.loadmat(file_path)
     a = data["a"]
     u = data["u"][..., -1]  # taking last timestep
+    return a, u
+
+
+def load_ns_nonbounded_new(file_path):
+    """Load NS-nonbounded dataset (new version with 25th and 50th timesteps)."""
+    data = sio.loadmat(file_path)
+    a = data["u"][..., 0]  # 25th timestep (stored at index 0)
+    u = data["u"][..., 1]  # 50th timestep (stored at index 1)
     return a, u
 
 
@@ -87,6 +96,11 @@ def get_dataset_info(dataset_name, training=True):
             "path_pattern": "data/DiffPDE/training/ns-nonbounded/ns-nonbounded_{}.mat",
             "range": range(1, 51),
         },
+        "ns-nonbounded_new": {
+            "loader": load_ns_nonbounded_new,
+            "path_pattern": "data/DiffPDE/training/ns-nonbounded_new/ns-nonbounded_{}.mat",
+            "range": range(1, 51),
+        },
         "burgers": {
             "loader": load_burgers,
             "path_pattern": "data/DiffPDE/training/burger/burger_{}.mat",
@@ -116,6 +130,11 @@ def get_dataset_info(dataset_name, training=True):
         },
         "ns-nonbounded": {
             "loader": load_ns_nonbounded,
+            "path_pattern": "data/DiffPDE/testing/ns-nonbounded.mat",
+            "range": range(1),
+        },
+        "ns-nonbounded_new": {
+            "loader": load_ns_nonbounded_new,
             "path_pattern": "data/DiffPDE/testing/ns-nonbounded.mat",
             "range": range(1),
         },
