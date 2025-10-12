@@ -95,16 +95,11 @@ class PDESolverDPS(PDESolver):
             )
             model_path = f"generation/fno_pad_trained_forward_{config['dataset']}.pth"
         else:
-            # Default to FNO surrogate
-            self.surrogate = FNO(
-                n_modes=(64, 64),
-                in_channels=1,
-                out_channels=1,
-                hidden_channels=64,
-                n_layers=4
-            )
-            model_path = f"generation/fno_trained_forward_{config['dataset']}.pth"
-        
+            # Surrogate Not Specified/Used
+            self.surrogate = None
+            model_path = None
+            return None
+            
         # Load trained forward surrogate
         try:
             # Check if weights_only is supported (PyTorch >= 1.13.0)
