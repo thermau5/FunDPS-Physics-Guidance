@@ -1,0 +1,61 @@
+╔══════════════════════════════════════════════════════════════════════════╗
+║                 NS-NONBOUNDED NEW DATASET - QUICK START                   ║
+╚══════════════════════════════════════════════════════════════════════════╝
+
+✅ STEP 1: Generate Training Data
+   cd dataset_generation/non-bounded-ns
+   python ns_2d.py
+   → Generates 50 files (50,000 samples total)
+   → Time: ~10-20 hours on GPU
+
+✅ STEP 2: Generate Test Data
+   cd dataset_generation/non-bounded-ns
+   python ns_2d_test.py
+   → Generates 1 file (1,000 samples)
+   → Time: ~15-30 minutes
+
+✅ STEP 3: Move Files
+   cd dataset_generation/non-bounded-ns
+   ./move_files.sh
+   → Organizes files into data/DiffPDE/ directories
+
+✅ STEP 4: Calculate Statistics
+   cd dataset_generation/non-bounded-ns
+   python calculate_stats.py
+   → Copy output and update utils/dataset_prop.py line 15
+
+✅ STEP 5: Process to HuggingFace Format (YOU DO THIS)
+   # Training
+   python utils/dataset_process.py ns-nonbounded_new
+   
+   # Testing
+   python utils/dataset_process.py ns-nonbounded_new --test
+
+───────────────────────────────────────────────────────────────────────────
+
+📂 OUTPUT LOCATIONS:
+   Training: data/DiffPDE/ns-nonbounded_new_hf/
+   Testing:  data/DiffPDE/ns-nonbounded_test_new_hf/
+
+📊 DATA STRUCTURE:
+   Input:  25th timestep (data[0])  → 128×128
+   Output: 50th timestep (data[1]) → 128×128
+
+🔧 KEY PARAMETERS:
+   - Reynolds number: 1000
+   - Spatial resolution: 128×128
+   - Total time: 10 (dimensionless)
+   - Time step: 1e-3
+
+───────────────────────────────────────────────────────────────────────────
+
+📝 FILES CREATED/MODIFIED:
+   ✓ dataset_generation/non-bounded-ns/ns_2d.py          (modified)
+   ✓ dataset_generation/non-bounded-ns/ns_2d_test.py     (new)
+   ✓ dataset_generation/non-bounded-ns/move_files.sh     (new)
+   ✓ dataset_generation/non-bounded-ns/calculate_stats.py (new)
+   ✓ utils/dataset_prop.py                               (modified)
+   ✓ utils/dataset_process.py                            (modified)
+
+╚══════════════════════════════════════════════════════════════════════════╝
+
