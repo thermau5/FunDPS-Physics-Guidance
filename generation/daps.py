@@ -345,7 +345,16 @@ class PDESolverDAPS(PDESolver):
                 hidden_channels=64,
                 n_layers=4
             )
-            model_path = f"generation/fno_pad_trained_forward_{config['dataset']}.pth"
+            model_path = f"generation/fno_pad_trained_forward_{config['dataset']}_128_new_400.pth"
+        elif surrogate_type.lower() == "fno_pad_scarce":
+            self.surrogate = FNO_pad(
+                n_modes=(64, 64),
+                in_channels=1,
+                out_channels=1,
+                hidden_channels=64,
+                n_layers=4
+            )
+            model_path = f"generation/fno_pad_trained_forward_{config['dataset']}_128_scarce_10000_200.pth"
         elif surrogate_type.lower() == "fno_pad_64":
             self.surrogate = FNO_pad(
                 n_modes=(32, 32),
@@ -377,6 +386,7 @@ class PDESolverDAPS(PDESolver):
             model_path = f"generation/fno_trained_forward_{config['dataset']}.pth"
         
         # Load trained forward surrogate
+        print(f'Using surrogate path: {model_path}')
         try:
             # Check if weights_only is supported (PyTorch >= 1.13.0)
             if hasattr(torch, '__version__') and torch.__version__ >= '1.13.0':
