@@ -1,14 +1,14 @@
 # Main options
 outdir: "exps"  # Where to save the results
 data: "data/DiffPDE/ns-nonbounded_hf"  # Path to the dataset
-resolution: 64  # Resolution of the dataset after downsampling
+resolution: 128  # Resolution of the dataset after downsampling
 cond: false  # Train class-conditional model
 arch: "ddpmpp-uno"  # Network architecture (options: ddpmpp, ncsnpp, adm, ddpmpp-uno)
 precond: "edm"  # Preconditioning & loss function (options: vp, ve, edm)
 
 # Hyperparameters
 duration: 10  # Training duration in millions of images
-batch: 32  # Total batch size
+batch: 12  # Total batch size
 batch_gpu: null  # Limit batch size per GPU (optional)
 nn_resolution: null  # Resolution of the network, defaults to resolution
 cbase: 64  # Channel multiplier (optional, varies by default)
@@ -20,6 +20,7 @@ dropout: 0.13  # Dropout probability
 augment: 0.12  # Augment probability
 xflip: false  # Enable dataset x-flips
 channel: 0  # Channel to use for the dataset
+DM_channel: [0] # DM channel(s) to train on. null = all channels, [0] = first channel only, [1] = second channel only.
 
 # Neural Operator-related
 attn_resolutions: [8]  # Resolutions to apply attention
