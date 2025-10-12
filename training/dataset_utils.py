@@ -14,8 +14,34 @@ class DatasetNormalizer:
         Initialize the normalizer with dataset-specific parameters.
         """
         self.dataset_name = dataset_name
-        self.mean = torch.tensor(stats["mean"]).reshape(1, len(stats["mean"]), 1, 1)
-        self.std = torch.tensor(stats["std"]).reshape(1, len(stats["std"]), 1, 1)
+        
+        # Support for both list/array stats and .npy file paths
+        mean = stats["mean"]
+        std = stats["std"]
+        
+        if isinstance(mean, str):
+            # Load from .npy file (for large datasets like JFM)
+            import numpy as np
+            mean = np.load(mean)
+            std = np.load(std)
+        
+        # Convert to tensor and reshape
+        mean_tensor = torch.tensor(mean) if not isinstance(mean, torch.Tensor) else mean
+        std_tensor = torch.tensor(std) if not isinstance(std, torch.Tensor) else std
+        
+        # Handle different stat shapes
+        if len(mean_tensor.shape) == 1:
+            # Standard case: [channel1_mean, channel2_mean] → [1, C, 1, 1]
+            self.mean = mean_tensor.reshape(1, len(mean), 1, 1)
+            self.std = std_tensor.reshape(1, len(std), 1, 1)
+        elif len(mean_tensor.shape) == 3:
+            # JFM case: [2, H, W] → needs special handling
+            # Will be broadcast during normalization
+            self.mean = mean_tensor.unsqueeze(0)  # [1, 2, H, W]
+            self.std = std_tensor.unsqueeze(0)    # [1, 2, H, W]
+        else:
+            raise ValueError(f"Unexpected stats shape: {mean_tensor.shape}")
+        
         self._transform = lambda x: x
         if dataset_name == "darcy":
             self._transform = transform_darcy
@@ -23,7 +49,10 @@ class DatasetNormalizer:
     def _check_shape(self, x: torch.Tensor):
         # Assuming x has shape (batch_size, channels, height, width)
         assert len(x.shape) == 4, f"Expected 4D tensor, got {len(x.shape)}D"
-        assert x.shape[1] in [1, 2], f"Expected 1 or 2 channels, got {x.shape[1]}"
+        # Allow flexible channel numbers: 1, 2 (standard NS), 10 (temporal), 24 (JFM), etc.
+        num_channels = self.mean.shape[1]
+        assert x.shape[1] == num_channels, \
+            f"Expected {num_channels} channels (from stats), got {x.shape[1]}"
         return True
 
     def normalize(self, x: torch.Tensor, channel=None) -> torch.Tensor:
