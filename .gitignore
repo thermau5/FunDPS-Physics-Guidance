@@ -178,3 +178,7 @@ Miniconda3-latest-Linux-x86_64.sh
 neuraloperator/
 fix_dependency/
 ics-dev-v2
+
+# Data and visualization files
+*.mat
+*.gif
