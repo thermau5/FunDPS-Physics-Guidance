@@ -51,14 +51,14 @@ from scipy.io import loadmat
 from training.dataset_hf import PDEDataset
 
 pde_direction = 'forward'  # or 'inverse', depending on the dataset
-dataset_name = 'poisson'  # Name of the dataset for saving/loading models
+dataset_name = 'helmholtz'  # Name of the dataset for saving/loading models # To change
 
 # === Resolution and batch size configuration ===
-RESOLUTION = 64  # Changed from 128 to 64 for lower resolution training
+RESOLUTION = 128  # Changed from 128 to 64 for lower resolution training
 batch_size = 25  # Increased from default 1 to 64 for better GPU utilization
 
 # === Load training data ===
-train_dataset = PDEDataset(path=f'data/DiffPDE/{dataset_name}_hf', resolution=RESOLUTION)
+train_dataset = PDEDataset(path=f'data/DiffPDE/{dataset_name}_hf', resolution=RESOLUTION, max_size=10000)
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
 # === Load testing data ===
@@ -163,7 +163,7 @@ test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 # FNO model configuration for 64x64 resolution
 # n_modes=(32, 32) is optimal for 64x64 resolution (typically use ~half the resolution)
 model = FNO_pad(
-    n_modes=(32, 32),  # Reduced from (64, 64) for 64x64 resolution
+    n_modes=(64, 64),  # Reduced from (64, 64) for 64x64 resolution
     in_channels=1,      # scalar input
     out_channels=1,     # scalar output
     hidden_channels=64,
@@ -368,7 +368,7 @@ for epoch in range(num_epochs):
     
     print("-" * 80)
 
-torch.save(model.state_dict(), f"generation/fno_pad_trained_{pde_direction}_{dataset_name}_{RESOLUTION}.pth")
+torch.save(model.state_dict(), f"generation/fno_pad_trained_{pde_direction}_{dataset_name}_{RESOLUTION}_scarce_10000.pth")
 
 #%%
 # ============================================================

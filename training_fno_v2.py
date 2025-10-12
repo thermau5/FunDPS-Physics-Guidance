@@ -22,18 +22,18 @@ from tqdm import tqdm
 # ==============================================
 
 # Dataset configuration
-PDE_DIRECTION = "forward"  # 'forward' or 'inverse'
+PDE_DIRECTION = "forward"  # 'forward' or 'inverse' # To change
 DATASET_NAME = "poisson"  # Dataset name for saving/loading models
 DATA_RESOLUTION = 128  # Original data resolution
 TRAIN_RESOLUTION = (128, 128)  # Training resolution (downsampled)   # To change
 
 # Training configuration
-BATCH_SIZE = 25
-NUM_EPOCHS = 50
+BATCH_SIZE = 40
+NUM_EPOCHS = 200
 LEARNING_RATE = 1e-4
 
 # Model configuration
-FNO_MODES = (32, 32)  # To change
+FNO_MODES = (64, 64)  # To change
 IN_CHANNELS = 1
 OUT_CHANNELS = 1
 HIDDEN_CHANNELS = 64
@@ -72,7 +72,7 @@ class SongUNOWrapper(torch.nn.Module):
 
 
 # Data loading
-train_dataset = PDEDataset(path=f"data/DiffPDE/{DATASET_NAME}_hf", resolution=DATA_RESOLUTION, max_size=5000)  # To change
+train_dataset = PDEDataset(path=f"data/DiffPDE/{DATASET_NAME}_hf", resolution=DATA_RESOLUTION)  # To change
 train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
 
 test_dataset = PDEDataset(path=f"data/DiffPDE/{DATASET_NAME}_test_hf", resolution=DATA_RESOLUTION)
@@ -88,14 +88,15 @@ try:
     # PyTorch 2.6+ approach: add safe globals and use weights_only=True
     import torch.serialization
     torch.serialization.add_safe_globals(['torch._C._nn.gelu'])
-    model.load_state_dict(torch.load(f"generation/fno_pad_trained_{PDE_DIRECTION}_{DATASET_NAME}_64.pth", weights_only=True))
+    model.load_state_dict(torch.load(f"generation/fno_pad_trained_{PDE_DIRECTION}_{DATASET_NAME}_128_200.pth", weights_only=True))
     print("Successfully loaded checkpoint with weights_only=True")
 except Exception as e:
     print(f"Loading with weights_only=True failed: {e}")
     print("Trying with weights_only=False (trusted source only)...")
     # Fallback to weights_only=False for compatibility with older checkpoints
-    model.load_state_dict(torch.load(f"generation/fno_pad_trained_{PDE_DIRECTION}_{DATASET_NAME}_64.pth", weights_only=False))
+    model.load_state_dict(torch.load(f"generation/fno_pad_trained_{PDE_DIRECTION}_{DATASET_NAME}_128_200.pth", weights_only=False))
     print("Successfully loaded checkpoint with weights_only=False")
+
 model = model.to(device)
 
 # Initialize wandb
@@ -304,7 +305,7 @@ for epoch in range(NUM_EPOCHS):
     print("-" * 80)
 
 # Save model
-model_path = f"generation/fno_pad_trained_{PDE_DIRECTION}_{DATASET_NAME}_{list(TRAIN_RESOLUTION)[0]}.pth"
+model_path = f"generation/fno_pad_trained_{PDE_DIRECTION}_{DATASET_NAME}_{list(TRAIN_RESOLUTION)[0]}_new.pth"
 torch.save(model.state_dict(), model_path)
 print(f"Model saved to: {model_path}")
 
