@@ -50,14 +50,37 @@ class GaussianRF(object):
 
         self.size = tuple(self.size)
 
+    # def sample(self, N):
+
+    #     coeff = torch.randn(N, *self.size, 2, device=self.device)
+
+    #     coeff[..., 0] = self.sqrt_eig * coeff[..., 0]
+    #     coeff[..., 1] = self.sqrt_eig * coeff[..., 1]
+
+    #     u = torch.fft.ifftn(coeff, dim=tuple(range(-self.dim, 0))).real
+
+    #     return u
+
+
     def sample(self, N):
-
-        coeff = torch.randn(N, *self.size, 2, device=self.device)
-
-        coeff[..., 0] = self.sqrt_eig * coeff[..., 0]
-        coeff[..., 1] = self.sqrt_eig * coeff[..., 1]
-
-        u = torch.ifft(coeff, self.dim, normalized=False)
-        u = u[..., 0]
-
-        return u
+        # Create complex tensor from random normal distribution
+        real_part = torch.randn(N, *self.size, device=self.device)
+        imag_part = torch.randn(N, *self.size, device=self.device)
+        
+        # Scale by sqrt_eig
+        real_part = self.sqrt_eig * real_part
+        imag_part = self.sqrt_eig * imag_part
+        
+        # Combine into complex tensor
+        coeff = torch.complex(real_part, imag_part)
+        
+        # Perform inverse FFT
+        if self.dim == 1:
+            u = torch.fft.ifftn(coeff, dim=(1,), norm='backward')
+        elif self.dim == 2:
+            u = torch.fft.ifftn(coeff, dim=(1, 2), norm='backward')
+        elif self.dim == 3:
+            u = torch.fft.ifftn(coeff, dim=(1, 2, 3), norm='backward')
+        
+        # Return real part
+        return u.real
