@@ -24,7 +24,9 @@ from training.dataset_hf import PDEDataset
 from training.dataset_utils import DatasetNormalizer
 
 # Add path for positional encoding
-sys.path.insert(0, '/home/thomaslin/FunDPS-Physics-dev-v2/temp_0-main/scripts')
+script_dir = os.path.dirname(os.path.abspath(__file__))
+temp_scripts_path = os.path.join(script_dir, 'temp_0-main', 'scripts')
+sys.path.insert(0, temp_scripts_path)
 from data0.positional_encoding import get_grid_positional_encoding
 import math
 
@@ -85,8 +87,10 @@ parser.add_argument(
 parser.add_argument(
     "--save-examples", "-s", type=int, default=10,
     help="Number of prediction examples to save as images")
+# Compute default config path dynamically
+default_config_path = os.path.join(script_dir, 'temp_0-main', 'config', 'ns1w_plot0.yaml')
 parser.add_argument(
-    "--config-path", "-c", default="/home/thomaslin/FunDPS-Physics-dev-v2/temp_0-main/config/ns1w_plot0.yaml",
+    "--config-path", "-c", default=default_config_path,
     help="Path to PINO config file")
 args = parser.parse_args()
 
@@ -100,7 +104,7 @@ print(f"Using device: {device}")
 # Load config
 print(f"Loading config...")
 original_cwd = os.getcwd()
-os.chdir('/home/thomaslin/FunDPS-Physics-dev-v2/temp_0-main/scripts')
+os.chdir(temp_scripts_path)
 try:
     config_name = "default"
     pipe = ConfigPipeline([
@@ -284,7 +288,7 @@ print(f"  Best L2:       {np.min(all_l2_array):.4f}")
 print(f"  Worst L2:      {np.max(all_l2_array):.4f}")
 
 if has_nan_inf:
-    print(f"\n⚠️  WARNING: {len(all_l2_array) - len(finite_l2)} samples had inf/nan L2 errors")
+    print(f"\n  WARNING: {len(all_l2_array) - len(finite_l2)} samples had inf/nan L2 errors")
     print(f"    (likely due to near-zero target fields)")
 
 print("="*70)
