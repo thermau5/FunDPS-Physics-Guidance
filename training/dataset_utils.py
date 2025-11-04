@@ -49,10 +49,7 @@ class DatasetNormalizer:
     def _check_shape(self, x: torch.Tensor):
         # Assuming x has shape (batch_size, channels, height, width)
         assert len(x.shape) == 4, f"Expected 4D tensor, got {len(x.shape)}D"
-        # Allow flexible channel numbers: 1, 2 (standard NS), 10 (temporal), 24 (JFM), etc.
-        num_channels = self.mean.shape[1]
-        assert x.shape[1] == num_channels, \
-            f"Expected {num_channels} channels (from stats), got {x.shape[1]}"
+        assert x.shape[1] in [1, 2], f"Expected 1 or 2 channels, got {x.shape[1]}"
         return True
 
     def normalize(self, x: torch.Tensor, channel=None) -> torch.Tensor:
