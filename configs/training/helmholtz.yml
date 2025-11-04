@@ -4,7 +4,7 @@ data: "data/DiffPDE/helmholtz_hf/"  # Path to the dataset
 resolution: 128  # Resolution of the dataset after downsampling
 cond: false  # Train class-conditional model
 arch: "ddpmpp-uno"  # Network architecture (options: ddpmpp, ncsnpp, adm, ddpmpp-uno)
-precond: "pi_edm"  # Preconditioning & loss function (options: vp, ve, edm, pi_edm)
+precond: "edm"  # Preconditioning & loss function (options: vp, ve, edm, pi_edm)
 
 # Hyperparameters
 duration: 10  # Training duration in millions of images
