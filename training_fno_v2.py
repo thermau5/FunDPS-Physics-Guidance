@@ -279,8 +279,9 @@ for epoch in range(NUM_EPOCHS):
     avg_batch_loss = sum(batch_losses) / len(batch_losses)
 
     # Evaluate on test set
-    print("\nEvaluating on test set...")
-    test_loss = evaluate_test_accuracy(model, test_loader, criterion, device)
+    if epoch % 10 == 0:
+        print("\nEvaluating on test set...")
+        test_loss = evaluate_test_accuracy(model, test_loader, criterion, device)
 
     print(f"\nEpoch {epoch+1}/{NUM_EPOCHS} Summary:")
     print(f"  Training Loss: {epoch_loss:.6f}")

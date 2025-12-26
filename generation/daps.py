@@ -316,6 +316,9 @@ class PDESolverDAPS(PDESolver):
             elif f"generation/fno_trained_forward_{config['dataset']}.pth" in os.listdir("generation"):
                 surrogate_type = "fno"
                 print("Auto-detected FNO surrogate model")
+            elif f"generation/pino_trained_forward_{config['dataset']}.pth" in os.listdir("generation"):
+                surrogate_type = "pino"
+                print("Auto-detected PINO surrogate model")
             else:
                 surrogate_type = "fno"  # Default fallback
                 print("No specific model found, defaulting to FNO")
@@ -373,6 +376,15 @@ class PDESolverDAPS(PDESolver):
                 n_layers=4
             )
             model_path = f"generation/fno_pad_trained_forward_{config['dataset']}_mix.pth"
+        elif surrogate_type.lower() == "pino":
+            self.surrogate = Pino(
+                n_modes=(64, 64),
+                in_channels=1,
+                out_channels=1,
+                hidden_channels=64,
+                n_layers=4
+            )
+            model_path = f"generation/pino_trained_forward_{config['dataset']}.pth"
         else:
             # Default to FNO surrogate
             print("Using Default FNO surrogate")
