@@ -93,7 +93,7 @@ class PDEDataset(Dataset):
             image = image[..., :: self._downsample, :: self._downsample]
 
         if self._channel is not None:
-            image = image[self._channel, ...] # filter out the channels that are not in self._channel
+            image = image[self._channel, ...]  # filter out the channels that are not in self._channel
 
         # Return image and dummy label (for compatibility)
         return image, np.zeros(0)
