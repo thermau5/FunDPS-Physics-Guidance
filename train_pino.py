@@ -24,7 +24,7 @@ TRAIN_RESOLUTION = (128, 128)  # Training resolution (downsampled)   # To change
 
 # Training configuration
 BATCH_SIZE = 25
-NUM_ITERATIONS = 10000  # Total number of training iterations
+NUM_ITERATIONS = 100000  # Total number of training iterations
 EVAL_INTERVAL = 50  # Evaluate every N iterations
 LEARNING_RATE = 1e-4
 
@@ -71,7 +71,8 @@ wandb.init(
 
 # Create timestamped folder for this run
 run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-run_folder = f"exps/run_{run_timestamp}"
+wandb_id = wandb.run.id
+run_folder = f"exps/run_{run_timestamp}_{wandb_id}"
 os.makedirs(run_folder, exist_ok=True)
 print(f"Run folder: {run_folder}")
 
@@ -226,7 +227,8 @@ if DATASET_NAME == "poisson":
 else:
     raise ValueError(f"Unsupported dataset for PDE loss: {DATASET_NAME}")
 
-optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
+optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE, betas=(0.9, 0.999))
+# optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, betas=(0.9, 0.999), weight_decay=1e-4)
 
 # Resume from checkpoint if provided
 start_iteration = 0
@@ -237,7 +239,15 @@ if args.resume:
     print(f"\nResuming from checkpoint: {args.resume}")
     checkpoint = torch.load(args.resume, map_location=device)
     model.load_state_dict(checkpoint["model_state_dict"])
-    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+
+    # Try to load optimizer state, but handle incompatibility (e.g., different optimizer type)
+    try:
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        print("Loaded optimizer state from checkpoint")
+    except (ValueError, KeyError, RuntimeError) as e:
+        print(f"Warning: Could not load optimizer state from checkpoint: {e}")
+        print("Continuing with fresh optimizer state")
+
     start_iteration = checkpoint["iteration"]
     best_test_loss = checkpoint["test_loss"]  # Use checkpoint's test loss as initial best
     best_iteration = start_iteration
@@ -320,115 +330,135 @@ train_loader_full_infinite = cycle(train_loader_full)
 model.train()
 pbar = tqdm(range(start_iteration, NUM_ITERATIONS), desc="Training", initial=start_iteration, total=NUM_ITERATIONS)
 
-for iteration in pbar:
-    # One iteration = data loss step + PDE/BC loss step
-    optimizer.zero_grad()
+try:
+    for iteration in pbar:
+        # One iteration = data loss step + PDE/BC loss step
+        optimizer.zero_grad()
 
-    # ============ Step 1: Data Loss ============
-    train_data_constrained, _ = next(train_loader_constrained_infinite)
-    train_data_constrained = train_data_constrained.to(device).float()
+        # ============ Step 1: Data Loss ============
+        train_data_constrained, _ = next(train_loader_constrained_infinite)
+        train_data_constrained = train_data_constrained.to(device).float()
 
-    # Prepare inputs and ground truths
-    if PDE_DIRECTION == "forward":
-        inputs_data = train_data_constrained[:, 0:1, :, :]
-        ground_truths = train_data_constrained[:, 1:2, :, :]
-    else:  # inverse
-        inputs_data = train_data_constrained[:, 1:2, :, :]
-        ground_truths = train_data_constrained[:, 0:1, :, :]
+        # Prepare inputs and ground truths
+        if PDE_DIRECTION == "forward":
+            inputs_data = train_data_constrained[:, 0:1, :, :]
+            ground_truths = train_data_constrained[:, 1:2, :, :]
+        else:  # inverse
+            inputs_data = train_data_constrained[:, 1:2, :, :]
+            ground_truths = train_data_constrained[:, 0:1, :, :]
 
-    # Downsample if needed
-    if TRAIN_RESOLUTION != (DATA_RESOLUTION, DATA_RESOLUTION):
-        inputs_data = torch.nn.functional.interpolate(inputs_data, size=TRAIN_RESOLUTION, mode="area")
-        ground_truths = torch.nn.functional.interpolate(ground_truths, size=TRAIN_RESOLUTION, mode="area")
+        # Downsample if needed
+        if TRAIN_RESOLUTION != (DATA_RESOLUTION, DATA_RESOLUTION):
+            inputs_data = torch.nn.functional.interpolate(inputs_data, size=TRAIN_RESOLUTION, mode="area")
+            ground_truths = torch.nn.functional.interpolate(ground_truths, size=TRAIN_RESOLUTION, mode="area")
 
-    # Forward pass and compute data loss
-    outputs_data = model(inputs_data)
-    loss_l2_batch = criterion_l2(outputs_data, ground_truths)
+        # Forward pass and compute data loss
+        outputs_data = model(inputs_data)
+        loss_l2_batch = criterion_l2(outputs_data, ground_truths)
 
-    # Backward (accumulate gradients)
-    loss_l2_batch.backward()
+        # Backward (accumulate gradients)
+        loss_l2_batch.backward()
 
-    # ============ Step 2: PDE/BC Loss ============
-    train_data_full, _ = next(train_loader_full_infinite)
-    train_data_full = train_data_full.to(device).float()
+        # ============ Step 2: PDE/BC Loss ============
+        train_data_full, _ = next(train_loader_full_infinite)
+        train_data_full = train_data_full.to(device).float()
 
-    # Prepare inputs (only need input channel for PDE step)
-    if PDE_DIRECTION == "forward":
-        inputs_pde = train_data_full[:, 0:1, :, :]
-    else:  # inverse
-        inputs_pde = train_data_full[:, 1:2, :, :]
+        # Prepare inputs (only need input channel for PDE step)
+        if PDE_DIRECTION == "forward":
+            inputs_pde = train_data_full[:, 0:1, :, :]
+        else:  # inverse
+            inputs_pde = train_data_full[:, 1:2, :, :]
 
-    # Downsample if needed
-    if TRAIN_RESOLUTION != (DATA_RESOLUTION, DATA_RESOLUTION):
-        inputs_pde = torch.nn.functional.interpolate(inputs_pde, size=TRAIN_RESOLUTION, mode="area")
+        # Downsample if needed
+        if TRAIN_RESOLUTION != (DATA_RESOLUTION, DATA_RESOLUTION):
+            inputs_pde = torch.nn.functional.interpolate(inputs_pde, size=TRAIN_RESOLUTION, mode="area")
 
-    # Forward pass
-    outputs_pde = model(inputs_pde)
+        # Forward pass
+        outputs_pde = model(inputs_pde)
 
-    # Construct full prediction for PDE loss
-    if PDE_DIRECTION == "forward":
-        full_prediction = torch.cat([inputs_pde, outputs_pde], dim=1)
-    else:  # inverse
-        full_prediction = torch.cat([outputs_pde, inputs_pde], dim=1)
+        # Construct full prediction for PDE loss
+        if PDE_DIRECTION == "forward":
+            full_prediction = torch.cat([inputs_pde, outputs_pde], dim=1)
+        else:  # inverse
+            full_prediction = torch.cat([outputs_pde, inputs_pde], dim=1)
 
-    # Compute PDE and BC losses
-    loss_pde_batch, loss_bc_batch = criterion_pde(full_prediction)
-    loss_pde_total = 0.1 * loss_pde_batch + 10 * loss_bc_batch
+        # Compute PDE and BC losses
+        loss_pde_batch, loss_bc_batch = criterion_pde(full_prediction)
+        loss_pde_total = 0.1 * loss_pde_batch + 10 * loss_bc_batch
 
-    # Backward (accumulate gradients)
-    loss_pde_total.backward()
+        # Backward (accumulate gradients)
+        loss_pde_total.backward()
 
-    # ============ Update Optimizer ============
-    optimizer.step()
+        # ============ Update Optimizer ============
+        optimizer.step()
 
-    # ============ Logging ============
-    batch_size_data = train_data_constrained.size(0)
-    batch_size_pde = train_data_full.size(0)
+        # ============ Logging ============
+        batch_size_data = train_data_constrained.size(0)
+        batch_size_pde = train_data_full.size(0)
 
-    wandb.log(
-        {
-            "loss_l2": loss_l2_batch.item() / batch_size_data,
-            "loss_pde": loss_pde_batch.item() / batch_size_pde,
-            "loss_bc": loss_bc_batch.item() / batch_size_pde,
-            "loss": (loss_l2_batch.item() / batch_size_data + loss_pde_total.item() / batch_size_pde),
-        },
-        step=iteration,
-    )
-
-    # Update progress bar
-    total_loss = loss_l2_batch.item() / batch_size_data + loss_pde_total.item() / batch_size_pde
-    pbar.set_postfix({"Loss": f"{total_loss:.6f}"})
-
-    # Periodic evaluation
-    if (iteration + 1) % EVAL_INTERVAL == 0 or iteration == NUM_ITERATIONS - 1:
-        model.eval()
-        test_loss = evaluate_test_accuracy(model, test_loader, criterion_l2, device)
-        model.train()
-
-        # Save best model
-        if test_loss < best_test_loss:
-            best_test_loss = test_loss
-            best_iteration = iteration + 1
-            best_model_path = f"{run_folder}/best_model.pth"
-            checkpoint = {
-                "iteration": iteration + 1,
-                "model_state_dict": model.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
-                "test_loss": test_loss,
-            }
-            torch.save(checkpoint, best_model_path)
-            print(f"\n*** Iteration {iteration+1}/{NUM_ITERATIONS}: New best! Test Loss: {test_loss:.6f} ***")
-        else:
-            print(f"\nIteration {iteration+1}/{NUM_ITERATIONS}: Test Loss: {test_loss:.6f}, Best: {best_test_loss:.6f} (iter {best_iteration})")
-
-        # Log metrics to wandb
         wandb.log(
             {
-                "test_loss": test_loss,
-                "learning_rate": optimizer.param_groups[0]["lr"],
+                "loss_l2": loss_l2_batch.item() / batch_size_data,
+                "loss_pde": loss_pde_batch.item() / batch_size_pde,
+                "loss_bc": loss_bc_batch.item() / batch_size_pde,
+                "loss": (loss_l2_batch.item() / batch_size_data + loss_pde_total.item() / batch_size_pde),
             },
-            step=iteration + 1,
+            step=iteration,
         )
+
+        # Update progress bar
+        total_loss = loss_l2_batch.item() / batch_size_data + loss_pde_total.item() / batch_size_pde
+        pbar.set_postfix({"Loss": f"{total_loss:.6f}"})
+
+        # Periodic evaluation
+        if (iteration + 1) % EVAL_INTERVAL == 0 or iteration == NUM_ITERATIONS - 1:
+            model.eval()
+            test_loss = evaluate_test_accuracy(model, test_loader, criterion_l2, device)
+            model.train()
+
+            # Save best model
+            if test_loss < best_test_loss:
+                best_test_loss = test_loss
+                best_iteration = iteration + 1
+                best_model_path = f"{run_folder}/best_model.pth"
+                checkpoint = {
+                    "iteration": iteration + 1,
+                    "model_state_dict": model.state_dict(),
+                    "optimizer_state_dict": optimizer.state_dict(),
+                    "test_loss": test_loss,
+                }
+                torch.save(checkpoint, best_model_path)
+                print(f"\n*** Iteration {iteration+1}/{NUM_ITERATIONS}: New best! Test Loss: {test_loss:.6f} ***")
+            else:
+                print(f"\nIteration {iteration+1}/{NUM_ITERATIONS}: Test Loss: {test_loss:.6f}, Best: {best_test_loss:.6f} (iter {best_iteration})")
+
+            # Log metrics to wandb
+            wandb.log(
+                {
+                    "test_loss": test_loss,
+                    "learning_rate": optimizer.param_groups[0]["lr"],
+                },
+                step=iteration + 1,
+            )
+
+except KeyboardInterrupt:
+    print("\n\nTraining interrupted by user (Ctrl+C)")
+    print(f"Saving checkpoint at iteration {iteration}...")
+
+    interrupt_checkpoint_path = f"{run_folder}/interrupted_iter{iteration}.pth"
+    interrupt_checkpoint = {
+        "iteration": iteration,
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "test_loss": None,
+    }
+    torch.save(interrupt_checkpoint, interrupt_checkpoint_path)
+    print(f"Checkpoint saved to: {interrupt_checkpoint_path}")
+    print(f"You can resume training with: --resume {interrupt_checkpoint_path}")
+
+    pbar.close()
+    wandb.finish()
+    raise  # Re-raise to exit the script
 
 pbar.close()
 print("-" * 80)
