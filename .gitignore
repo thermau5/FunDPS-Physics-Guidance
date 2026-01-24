@@ -7,6 +7,7 @@ debug.*
 temp.*
 *.png
 *.pth
+*.pkl
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

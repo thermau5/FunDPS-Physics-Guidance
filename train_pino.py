@@ -25,16 +25,16 @@ TRAIN_RESOLUTION = (128, 128)  # Training resolution (downsampled)   # To change
 # Training configuration
 BATCH_SIZE = 25
 NUM_ITERATIONS = 100000  # Total number of training iterations
-EVAL_INTERVAL = 50  # Evaluate every N iterations
-LEARNING_RATE = 1e-4
+EVAL_INTERVAL = 100  # Evaluate every N iterations
+LEARNING_RATE = 1e-6
 
 # Model configuration
 ARCHITECTURE = "fno_pad"  # Model architecture
-FNO_MODES = (64, 64)  # To change
+FNO_MODES = (32, 32)  # To change
 IN_CHANNELS = 1
 OUT_CHANNELS = 1
 HIDDEN_CHANNELS = 64
-N_LAYERS = 3
+N_LAYERS = 4
 
 # Wandb configuration
 WANDB_PROJECT = "fundps-physics-guidance"
@@ -202,7 +202,7 @@ def evaluate_test_accuracy(model, test_loader, criterion, device):
 train_dataset_constrained = PDEDataset(
     path=f"data/DiffPDE/{DATASET_NAME}_hf",
     resolution=DATA_RESOLUTION,
-    max_size=100,  # First 100 samples for supervised training
+    max_size=500,  # First 100 samples for supervised training
 )
 train_loader_constrained = DataLoader(train_dataset_constrained, batch_size=BATCH_SIZE, shuffle=True)
 
@@ -234,6 +234,8 @@ optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE, betas=(0.9, 0
 start_iteration = 0
 best_test_loss = float("inf")
 best_iteration = 0
+
+# model.load_state_dict(torch.load(".pth", map_location=device))
 
 if args.resume:
     print(f"\nResuming from checkpoint: {args.resume}")
@@ -268,9 +270,7 @@ else:
 # exit()
 
 # Training loop
-print(f"Starting training with {NUM_ITERATIONS} iterations")
-print(f"Constrained dataset samples: {len(train_dataset_constrained)} (for data loss on even iterations)")
-print(f"Full dataset samples: {len(train_dataset_full)} (for PDE/BC loss on odd iterations)")
+print(f"Starting training for {NUM_ITERATIONS} iterations")
 print(f"Batch size: {BATCH_SIZE}")
 print(f"Evaluation interval: {EVAL_INTERVAL} iterations")
 print(f"Learning rate: {LEARNING_RATE}")
@@ -311,6 +311,7 @@ print(f"Learning rate: {LEARNING_RATE}")
 
 # test_loss_warmup = evaluate_test_accuracy(model, test_loader, criterion_l2, device)
 # print(f"Test loss after warmup: {test_loss_warmup:.6f}")
+# exit()
 
 print("-" * 80)
 
