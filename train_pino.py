@@ -164,7 +164,6 @@ print(f"Full dataset size: {len(train_dataset_full)}")
 # Training setup
 criterion_l2 = LpLoss(d=2, p=2)
 criterion_pde = get_pde_loss(DATASET_NAME, train_dataset_full)
-print(f"Using PDE loss for dataset: {DATASET_NAME}")
 
 optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE, betas=(0.9, 0.999))
 # optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, betas=(0.9, 0.999), weight_decay=1e-4)
