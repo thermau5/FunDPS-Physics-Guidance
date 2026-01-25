@@ -1,16 +1,18 @@
 import os
 from datetime import datetime
 import argparse
+import json
 
 import torch
 import torch.nn.functional as F
-from neuralop.models.fno import FNO
+from neuralop.models.fno_legacy import FNO
 from neuralop.losses import LpLoss
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 import wandb
 from training.dataset_hf import PDEDataset
+from pino_loss import get_pde_loss
 
 # ==============================================
 # HYPERPARAMETERS
@@ -26,11 +28,11 @@ TRAIN_RESOLUTION = (128, 128)  # Training resolution (downsampled)   # To change
 BATCH_SIZE = 25
 NUM_ITERATIONS = 100000  # Total number of training iterations
 EVAL_INTERVAL = 100  # Evaluate every N iterations
-LEARNING_RATE = 1e-6
+LEARNING_RATE = 1e-5
 
 # Model configuration
 ARCHITECTURE = "fno_pad"  # Model architecture
-FNO_MODES = (32, 32)  # To change
+FNO_MODES = (32, 32)
 IN_CHANNELS = 1
 OUT_CHANNELS = 1
 HIDDEN_CHANNELS = 64
@@ -38,7 +40,6 @@ N_LAYERS = 4
 
 # Wandb configuration
 WANDB_PROJECT = "fundps-physics-guidance"
-extra_config = {}
 
 # ==============================================
 
@@ -47,26 +48,24 @@ parser = argparse.ArgumentParser(description="Train PINO model")
 parser.add_argument("--resume", "-r", type=str, default=None, help="Path to checkpoint to resume from")
 args = parser.parse_args()
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(f"Using device: {device}")
+config = {
+    "dataset": DATASET_NAME,
+    "pde_direction": PDE_DIRECTION,
+    "batch_size": BATCH_SIZE,
+    "num_iterations": NUM_ITERATIONS,
+    "eval_interval": EVAL_INTERVAL,
+    "learning_rate": LEARNING_RATE,
+    "resolution": TRAIN_RESOLUTION,
+    "architecture": ARCHITECTURE,
+    "fno_modes": FNO_MODES,
+    "hidden_channels": HIDDEN_CHANNELS,
+    "n_layers": N_LAYERS,
+}
 
 wandb.init(
     project=WANDB_PROJECT,
     name=f"{ARCHITECTURE}_{DATASET_NAME}_{PDE_DIRECTION}_{TRAIN_RESOLUTION[0]}",
-    config={
-        "dataset": DATASET_NAME,
-        "pde_direction": PDE_DIRECTION,
-        "batch_size": BATCH_SIZE,
-        "num_iterations": NUM_ITERATIONS,
-        "eval_interval": EVAL_INTERVAL,
-        "learning_rate": LEARNING_RATE,
-        "resolution": TRAIN_RESOLUTION,
-        "architecture": ARCHITECTURE,
-        "fno_modes": FNO_MODES,
-        "hidden_channels": HIDDEN_CHANNELS,
-        "n_layers": N_LAYERS,
-        **extra_config,
-    },
+    config=config,
 )
 
 # Create timestamped folder for this run
@@ -75,6 +74,15 @@ wandb_id = wandb.run.id
 run_folder = f"exps/run_{run_timestamp}_{wandb_id}"
 os.makedirs(run_folder, exist_ok=True)
 print(f"Run folder: {run_folder}")
+
+# Save config to run folder
+config_path = os.path.join(run_folder, "config.json")
+with open(config_path, "w") as f:
+    json.dump(config, f, indent=2)
+print(f"Config saved to: {config_path}")
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
 
 
 class FNO_Pad(FNO):
@@ -103,73 +111,6 @@ model = model.to(device)
 
 num_params = sum(p.numel() for p in model.parameters())
 print(f"Number of parameters in the model: {num_params}")
-
-
-class PoissonLoss(object):
-    """Class to handle PDE loss calculations for the solver.
-
-    This class manages the calculation of PDE losses for solving differential equations.
-    """
-
-    def __init__(self, dataset_ref):
-        self.normalizer = dataset_ref.create_normalizer()
-        self.loss_func = LpLoss(d=2, p=2)
-
-    def __call__(self, x_pred):
-        """Calculate the PDE loss for Poisson equation.
-
-        The Poisson equation is: ∇²u = a
-        where a is the source term and u is the solution field.
-
-        Args:
-            x_pred (torch.Tensor): Predicted data containing both fields
-                First channel ([:,0:1]) is source term a
-                Second channel ([:,1:2]) is solution field u
-
-        Returns:
-            torch.Tensor: PDE residual
-        """
-        x_pred = self.normalizer.denormalize(x_pred)
-        a_pred = x_pred[:, 0:1]
-        u_pred = x_pred[:, 1:2]
-
-        # Calculate grid spacing
-        length = a_pred.shape[-1]
-        h = 1 / (length - 1)
-
-        # Calculate Laplacian using second order finite difference (interior points only)
-        laplacian = (u_pred[..., :-2, 1:-1] + u_pred[..., 2:, 1:-1] + u_pred[..., 1:-1, :-2] + u_pred[..., 1:-1, 2:] - 4 * u_pred[..., 1:-1, 1:-1]) / h**2
-
-        # Match a_pred to laplacian size (interior points only)
-        a_pred_interior = a_pred[..., 1:-1, 1:-1]
-
-        pde_loss = self.loss_func(laplacian, a_pred_interior)
-
-        # plot for debugging
-        # import matplotlib.pyplot as plt
-        # import numpy as np
-
-        # diff = laplacian[0, 0].detach().cpu().numpy() - a_pred_interior[0, 0].detach().cpu().numpy()
-        # plt.imshow(diff, cmap="bwr")
-        # plt.colorbar()
-        # plt.title("Laplacian(u) - a (interior points)")
-        # plt.savefig("pde_residual_debug.png")
-        # plt.close()
-        # exit()
-
-        # Boundary condition loss: u should be 0 on all boundaries
-        # Extract boundaries: top, bottom, left, right
-        u_top = u_pred[..., 0, :]  # First row
-        u_bottom = u_pred[..., -1, :]  # Last row
-        u_left = u_pred[..., :, 0]  # First column
-        u_right = u_pred[..., :, -1]  # Last column
-
-        # Target is zero for all boundaries
-        target_zero = torch.zeros_like(u_top)
-
-        bc_loss = (self.loss_func.abs(u_top, target_zero) + self.loss_func.abs(u_bottom, target_zero) + self.loss_func.abs(u_left, target_zero) + self.loss_func.abs(u_right, target_zero)) / 4.0
-
-        return pde_loss, bc_loss
 
 
 def evaluate_test_accuracy(model, test_loader, criterion, device):
@@ -222,10 +163,8 @@ print(f"Full dataset size: {len(train_dataset_full)}")
 
 # Training setup
 criterion_l2 = LpLoss(d=2, p=2)
-if DATASET_NAME == "poisson":
-    criterion_pde = PoissonLoss(train_dataset_full)
-else:
-    raise ValueError(f"Unsupported dataset for PDE loss: {DATASET_NAME}")
+criterion_pde = get_pde_loss(DATASET_NAME, train_dataset_full)
+print(f"Using PDE loss for dataset: {DATASET_NAME}")
 
 optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE, betas=(0.9, 0.999))
 # optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, betas=(0.9, 0.999), weight_decay=1e-4)
@@ -263,7 +202,7 @@ else:
 # for test_data, _ in test_loader:
 #     test_data = test_data.to(device).float()
 
-#     pde_loss = criterion_pde(test_data)
+#     pde_loss, _ = criterion_pde(test_data)
 #     total_test_pde_loss += pde_loss.item()
 
 # print(f"Initial PDE loss on test set before training: {total_test_pde_loss / len(test_loader):.6f}")
