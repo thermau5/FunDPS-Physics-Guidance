@@ -30,6 +30,9 @@ class PDESolver:
         self.cnt_losses_plots = 0
         self.cnt_spectral_plots = 0
         self.n_process_steps = self.config["n_process_steps"]
+        # Initialize storage for spectral errors across all batches
+        self.all_spectral_geometric_means = []
+        self.all_spectral_medians = []
 
         # Configuration for spectral energy plotting (default to True for backward compatibility)
         self.plot_spectral_energy_enabled = self.config.get("plot_spectral_energy", False)
@@ -110,13 +113,17 @@ class PDESolver:
             self.save_results(pred, f"{self.save_dir}/results/batch_{i}.npy")
             self.plot_results(pred, gt, metrics, self.save_dir)
             if self.plot_spectral_energy_enabled:
-                self.plot_spectral_energy(pred, gt, self.save_dir)
+                self.plot_spectral_energy(pred, gt, self.save_dir, is_first_batch_iteration=(i == 0))
             if "loss_history" in aux:
                 self.plot_losses(aux["loss_history"], self.save_dir)
             if "intermediates" in aux and "intermediates_channel_index" in aux:
                 self.plot_process(aux["intermediates"], aux["intermediates_channel_index"], gt, self.save_dir)
 
         self.finalize_stats(self.save_dir)
+        
+        # Print spectral errors summary after processing all batches
+        if self.plot_spectral_energy_enabled:
+            self.print_spectral_errors_summary()
 
     def generate_single_batch(self, observation):
         raise NotImplementedError
@@ -398,9 +405,9 @@ class PDESolver:
 
         # Define radial bins for averaging based on actual frequency range
         # Note: fftfreq returns normalized frequencies in [-0.5, 0.5), so k_max ≈ 0.707 for square grids
-        k_max = np.max(k_radial)  # Maximum frequency magnitude
+        k_max = 0.5  # Maximum frequency magnitude
         n_bins = min(nx, ny) // 2  # Number of bins
-        k_bins = np.linspace(0, k_max, n_bins + 1)
+        k_bins = np.linspace(0, k_max, n_bins + 1)[1:]
         k_centers = (k_bins[1:] + k_bins[:-1]) / 2
 
         # Radially average the power spectrum
@@ -413,29 +420,39 @@ class PDESolver:
 
         return k_centers, power_radial
 
-    def plot_spectral_energy(self, pred, gt, save_dir):
+    def plot_spectral_energy(self, pred, gt, save_dir, is_first_batch_iteration=False):
         """Plot spectral energy comparison between predicted and ground truth fields.
 
         Args:
             pred (torch.Tensor): Predicted tensor [batch_size, channels, height, width]
             gt (torch.Tensor): Ground truth tensor [batch_size, channels, height, width]
             save_dir (str): Directory to save the plot
+            is_first_batch_iteration (bool): Whether this is the first batch iteration (i==0)
         """
-        if self.cnt_spectral_plots >= self.n_plots:
-            return
-
         pred = pred.detach().cpu().numpy()
         gt = gt.detach().cpu().numpy()
         batch_size, n_channels = pred.shape[:2]
 
+        # Initialize storage if this is the first call or if channel count changed
+        if not hasattr(self, 'all_spectral_geometric_means'):
+            self.all_spectral_geometric_means = [[] for _ in range(n_channels)]
+            self.all_spectral_medians = [[] for _ in range(n_channels)]
+        else:
+            # Ensure lists have correct number of channels (resize if needed)
+            while len(self.all_spectral_geometric_means) < n_channels:
+                self.all_spectral_geometric_means.append([])
+                self.all_spectral_medians.append([])
+
         for batch_idx in range(batch_size):
-            # Create figure with subplots for each channel
-            fig, axes = plt.subplots(1, n_channels, figsize=(6 * n_channels, 5), squeeze=False)
-            fig.suptitle("Spectral Energy Comparison", fontsize=16)
-
+            # Check if we should create plots (only up to n_plots limit)
+            should_plot = self.cnt_spectral_plots < self.n_plots
+            
+            # Create figure if we're plotting this batch
+            if should_plot:
+                fig, axes = plt.subplots(2, n_channels, figsize=(6 * n_channels, 10), squeeze=False)
+                fig.suptitle("Spectral Energy Comparison", fontsize=16)
+            
             for c in range(n_channels):
-                ax = axes[0, c]
-
                 # Get data for this channel and batch
                 pred_field = pred[batch_idx, c]
                 gt_field = gt[batch_idx, c]
@@ -444,29 +461,80 @@ class PDESolver:
                 k_pred, power_pred = self.compute_spectral_energy(pred_field)
                 k_gt, power_gt = self.compute_spectral_energy(gt_field)
 
-                # Plot on log-log scale
-                ax.loglog(k_pred, power_pred, "r-", label="Predicted", linewidth=2, alpha=0.8)
-                ax.loglog(k_gt, power_gt, "b-", label="Ground Truth", linewidth=2, alpha=0.8)
-
-                ax.set_xlabel("Wave number k")
-                ax.set_ylabel("Power Spectral Density")
-                ax.set_title(f"Channel {c}")
-                ax.legend()
-                ax.grid(True, alpha=0.3)
-
-                # Add some statistics
-                # Compute relative error in spectral energy
+                # Compute relative error
                 if len(k_pred) == len(k_gt):
-                    spectral_error = np.mean(np.abs(power_pred - power_gt) / (power_gt + 1e-10))
-                    print(f"Spectral Rel. Error: {spectral_error:.3f}")
+                    k_common = k_gt
+                    relative_error = np.abs(power_pred - power_gt) / (power_gt + 1e-10)
+                    
+                    valid_mask = (relative_error > 0) & np.isfinite(relative_error)
+                    if np.any(valid_mask):
+                        valid_errors = relative_error[valid_mask]
+                        
+                        geometric_mean = np.exp(np.mean(np.log(valid_errors + 1e-10)))
+                        median_error = np.median(valid_errors)
+                        
+                        # Always store errors for averaging across all batches
+                        self.all_spectral_geometric_means[c].append(geometric_mean)
+                        self.all_spectral_medians[c].append(median_error)
+                        
+                        # Print spectral errors for first batch (similar to L2 errors)
+                        if is_first_batch_iteration and batch_idx == 0:
+                            if c == 0:
+                                print("Spectral Rel. Error for first batch:")
+                            print(f"  Channel {c}: Geometric Mean: {geometric_mean:.3f}, Median: {median_error:.3f}")
+                        
+                        # Only create plots up to n_plots limit
+                        if should_plot:
+                            # Top row: Spectral energy comparison
+                            ax_energy = axes[0, c]
+                            # Bottom row: Relative error as function of k
+                            ax_error = axes[1, c]
 
-            plt.tight_layout()
-            plt.savefig(f"{save_dir}/spectral_energy_{batch_idx}.png", dpi=300, bbox_inches="tight")
-            plt.close()
+                            # Plot spectral energy on log-log scale (top row)
+                            ax_energy.loglog(k_pred, power_pred, "r-", label="Predicted", linewidth=2, alpha=0.8)
+                            ax_energy.loglog(k_gt, power_gt, "b-", label="Ground Truth", linewidth=2, alpha=0.8)
 
-            self.cnt_spectral_plots += 1
-            if self.cnt_spectral_plots >= self.n_plots:
-                break
+                            ax_energy.set_xlabel("Wave number k")
+                            ax_energy.set_ylabel("Power Spectral Density")
+                            ax_energy.set_title(f"Channel {c} - Spectral Energy")
+                            ax_energy.legend()
+                            ax_energy.grid(True, alpha=0.3)
+
+                            # Plot relative error vs k
+                            ax_error.loglog(k_common, relative_error, "g-", label="Relative Error", linewidth=2, alpha=0.8)
+                            ax_error.set_xlabel("Wave number k")
+                            ax_error.set_ylabel("Relative Error |P_pred - P_gt| / P_gt")
+                            ax_error.set_title(f"Channel {c} - Spectral Error vs k")
+                            ax_error.legend()
+                            ax_error.grid(True, alpha=0.3)
+                            
+                            # Add geometric mean to plot
+                            ax_error.text(0.98, 0.02, f"Geom. Mean: {geometric_mean:.3f}", 
+                                         transform=ax_error.transAxes, fontsize=10,
+                                         verticalalignment='bottom', horizontalalignment='right',
+                                         bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+                else:
+                    if should_plot:
+                        print(f"Warning: k_pred and k_gt have different lengths for channel {c}, batch {batch_idx}")
+
+            # Save plot only if we haven't reached the limit
+            if should_plot:
+                plt.tight_layout()
+                plt.savefig(f"{save_dir}/spectral_energy_{self.cnt_spectral_plots}.png", dpi=300, bbox_inches="tight")
+                plt.close()
+                self.cnt_spectral_plots += 1
+
+    def print_spectral_errors_summary(self):
+        """Print average spectral errors across all batches."""
+        if not hasattr(self, 'all_spectral_geometric_means') or len(self.all_spectral_geometric_means) == 0:
+            return
+        
+        n_channels = len(self.all_spectral_geometric_means)
+        for c in range(n_channels):
+            if len(self.all_spectral_geometric_means[c]) > 0:
+                avg_geometric_mean = np.mean(self.all_spectral_geometric_means[c])
+                avg_median = np.mean(self.all_spectral_medians[c])
+                print(f"Spectral Rel. Error (Channel {c}): Geometric Mean: {avg_geometric_mean:.3f}, Median: {avg_median:.3f}")
 
     def save_results(self, pred, save_path):
         """Save results to disk.
