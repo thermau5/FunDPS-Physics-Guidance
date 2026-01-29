@@ -75,16 +75,6 @@ class PoissonLoss(object):
 
 
 class NavierStokesLoss(object):
-    """Class to handle PDE loss calculations for the non-bounded Navier-Stokes equation.
-
-    For the non-bounded Navier-Stokes case, the physics constraint is the
-    incompressibility condition: ∇ · u = 0, which translates to checking
-    divergence-free condition on the vorticity field.
-
-    This class computes:
-    1. PDE residual loss: ||∇ · ω|| where ω is vorticity
-    """
-
     def __init__(self, dataset_ref):
         """Initialize Navier-Stokes loss with dataset normalizer.
 
@@ -95,54 +85,15 @@ class NavierStokesLoss(object):
         self.loss_func = LpLoss(d=2, p=2)
 
     def __call__(self, x_pred):
-        """Calculate the PDE loss for non-bounded Navier-Stokes equation.
-
-        Args:
-            x_pred (torch.Tensor): Predicted data containing vorticity field
-                Second channel ([:,1:2]) is vorticity field ω
-
-        Returns:
-            tuple: (pde_loss, bc_loss)
-                - pde_loss: Divergence of vorticity loss
-                - bc_loss: Zero tensor (no boundary conditions for non-bounded case)
-        """
+        """Calculate the PDE loss for non-bounded Navier-Stokes equation."""
         x_pred = self.normalizer.denormalize(x_pred)
-        device = x_pred.device
-        vorticity = x_pred[:, 1:2]
-
-        # Use dx=1.0 for better accuracy
-        dx = 1.0
-        deriv_x = torch.tensor([[1, 0, -1]], dtype=torch.float64, device=device).view(1, 1, 1, 3) / (2 * dx)
-        deriv_y = torch.tensor([[1], [0], [-1]], dtype=torch.float64, device=device).view(1, 1, 3, 1) / (2 * dx)
-
-        # Ensure kernels are on the same device and dtype as vorticity
-        deriv_x = deriv_x.to(dtype=vorticity.dtype, device=vorticity.device)
-        deriv_y = deriv_y.to(dtype=vorticity.dtype, device=vorticity.device)
-
-        # Calculate divergence of vorticity
-        div_vort_x = F.conv2d(vorticity, deriv_x, padding=(0, 1))
-        div_vort_y = F.conv2d(vorticity, deriv_y, padding=(1, 0))
-        pde_residual = div_vort_x + div_vort_y
-
-        # Remove boundary points
-        pde_residual_interior = pde_residual[:, :, 1:-1, 1:-1]
-
-        # Plot PDE residual
-        # import matplotlib.pyplot as plt
-
-        # plt.imshow(pde_residual_interior[0, 0].cpu().detach().numpy())
-        # plt.colorbar()
-        # plt.title("PDE Residual (Divergence of Vorticity)")
-        # plt.savefig("pde_residual.png")
-        # plt.close()
-        # exit()
-
-        # Target is zero (divergence-free condition)
-        target_zero = torch.zeros_like(pde_residual_interior)
-        pde_loss = self.loss_func.abs(pde_residual_interior, target_zero)
+        # u0_pred_sum = x_pred[:, 0:1].sum(dim=(-2, -1), keepdim=True)
+        u1_pred_sum = x_pred[:, 1:2].sum(dim=(-2, -1), keepdim=True)
+        zeros = torch.zeros_like(u1_pred_sum)
+        pde_loss = self.loss_func.abs(u1_pred_sum, zeros)
 
         # No boundary conditions for non-bounded case
-        bc_loss = torch.tensor(0.0, device=device)
+        bc_loss = torch.tensor(0.0)
 
         return pde_loss, bc_loss
 
@@ -196,8 +147,8 @@ class HelmholtzLoss(object):
         u_pred_interior = u_pred[..., 1:-1, 1:-1]
 
         # PDE residual: ∇²u + u - a = 0
-        pde_residual = laplacian + u_pred_interior - a_pred_interior
         pde_loss = self.loss_func(laplacian + u_pred_interior, a_pred_interior)
+        pde_residual = laplacian + u_pred_interior - a_pred_interior
 
         # Plot PDE residual
         # import matplotlib.pyplot as plt

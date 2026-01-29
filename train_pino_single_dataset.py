@@ -20,13 +20,13 @@ from pino_loss import get_pde_loss
 
 # Dataset configuration
 PDE_DIRECTION = "forward"  # 'forward' or 'inverse'
-DATASET_NAME = "poisson"  # Dataset name for saving/loading models
+DATASET_NAME = "ns-nonbounded"  # Dataset name
 DATA_RESOLUTION = 128  # Original data resolution
 TRAIN_RESOLUTION = (128, 128)  # Training resolution (downsampled)   # To change
 
 # Training configuration
-BATCH_SIZE = 25
-NUM_ITERATIONS = 10000  # Total number of training iterations
+BATCH_SIZE = 20
+NUM_ITERATIONS = 100000  # Total number of training iterations
 EVAL_INTERVAL = 100  # Evaluate every N iterations
 LEARNING_RATE = 1e-4
 
@@ -36,7 +36,7 @@ FNO_MODES = (64, 64)  # To change
 IN_CHANNELS = 1
 OUT_CHANNELS = 1
 HIDDEN_CHANNELS = 64
-N_LAYERS = 4
+N_LAYERS = 8
 
 # Wandb configuration
 WANDB_PROJECT = "fundps-physics-guidance"
@@ -66,7 +66,7 @@ config = {
 
 wandb.init(
     project=WANDB_PROJECT,
-    name=f"{ARCHITECTURE}_{DATASET_NAME}_{PDE_DIRECTION}_{TRAIN_RESOLUTION[0]}",
+    name=f"{DATASET_NAME}_{TRAIN_RESOLUTION[0]}",
     config=config,
 )
 
@@ -284,6 +284,7 @@ try:
         # Compute the loss - these return batch-averaged losses
         loss_l2_batch = criterion_l2(outputs, ground_truths)
         loss_pde_batch, loss_bc_batch = criterion_pde(outputs)
+        # loss_batch = loss_l2_batch + 0.01 * loss_pde_batch + 10 * loss_bc_batch
         loss_batch = loss_l2_batch
 
         # Backpropagation and optimization step

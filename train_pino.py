@@ -64,7 +64,7 @@ config = {
 
 wandb.init(
     project=WANDB_PROJECT,
-    name=f"{ARCHITECTURE}_{DATASET_NAME}_{PDE_DIRECTION}_{TRAIN_RESOLUTION[0]}",
+    name=f"{DATASET_NAME}_{TRAIN_RESOLUTION[0]}",
     config=config,
 )
 
@@ -112,6 +112,26 @@ model = model.to(device)
 num_params = sum(p.numel() for p in model.parameters())
 print(f"Number of parameters in the model: {num_params}")
 
+# Data loading
+# Constrained dataset (for data loss on even iterations)
+train_dataset_constrained = PDEDataset(
+    path=f"data/DiffPDE/{DATASET_NAME}_hf",
+    resolution=DATA_RESOLUTION,
+    max_size=500,  # First 100 samples for supervised training
+)
+train_loader_constrained = DataLoader(train_dataset_constrained, batch_size=BATCH_SIZE, shuffle=True)
+
+# Full dataset (for PDE/BC loss on odd iterations)
+train_dataset_full = PDEDataset(
+    path=f"data/DiffPDE/{DATASET_NAME}_hf",
+    resolution=DATA_RESOLUTION,
+    max_size=None,  # All training data for physics-based training
+)
+train_loader_full = DataLoader(train_dataset_full, batch_size=BATCH_SIZE, shuffle=True)
+
+test_dataset = PDEDataset(path=f"data/DiffPDE/{DATASET_NAME}_test_hf", resolution=DATA_RESOLUTION, max_size=1000)
+test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
+
 
 def evaluate_test_accuracy(model, test_loader, criterion, device):
     """Evaluate model on test set and return average loss."""
@@ -138,26 +158,6 @@ def evaluate_test_accuracy(model, test_loader, criterion, device):
     return test_loss / len(test_loader.dataset)
 
 
-# Data loading
-# Constrained dataset (for data loss on even iterations)
-train_dataset_constrained = PDEDataset(
-    path=f"data/DiffPDE/{DATASET_NAME}_hf",
-    resolution=DATA_RESOLUTION,
-    max_size=500,  # First 100 samples for supervised training
-)
-train_loader_constrained = DataLoader(train_dataset_constrained, batch_size=BATCH_SIZE, shuffle=True)
-
-# Full dataset (for PDE/BC loss on odd iterations)
-train_dataset_full = PDEDataset(
-    path=f"data/DiffPDE/{DATASET_NAME}_hf",
-    resolution=DATA_RESOLUTION,
-    max_size=None,  # All training data for physics-based training
-)
-train_loader_full = DataLoader(train_dataset_full, batch_size=BATCH_SIZE, shuffle=True)
-
-test_dataset = PDEDataset(path=f"data/DiffPDE/{DATASET_NAME}_test_hf", resolution=DATA_RESOLUTION)
-test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
-
 print(f"Constrained dataset size: {len(train_dataset_constrained)}")
 print(f"Full dataset size: {len(train_dataset_full)}")
 
@@ -178,21 +178,18 @@ best_iteration = 0
 if args.resume:
     print(f"\nResuming from checkpoint: {args.resume}")
     checkpoint = torch.load(args.resume, map_location=device)
-    model.load_state_dict(checkpoint["model_state_dict"])
-
-    # Try to load optimizer state, but handle incompatibility (e.g., different optimizer type)
-    try:
+    if "model_state_dict" not in checkpoint:
+        model.load_state_dict(checkpoint)
+        print("Resumed model weights only, assuming legacy checkpoint format")
+    else:
+        model.load_state_dict(checkpoint["model_state_dict"])
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-        print("Loaded optimizer state from checkpoint")
-    except (ValueError, KeyError, RuntimeError) as e:
-        print(f"Warning: Could not load optimizer state from checkpoint: {e}")
-        print("Continuing with fresh optimizer state")
 
-    start_iteration = checkpoint["iteration"]
-    best_test_loss = checkpoint["test_loss"]  # Use checkpoint's test loss as initial best
-    best_iteration = start_iteration
-    print(f"Resumed from iteration {start_iteration}")
-    print(f"Checkpoint test loss: {checkpoint['test_loss']:.6f}")
+        start_iteration = checkpoint["iteration"]
+        best_test_loss = checkpoint["test_loss"]  # Use checkpoint's test loss as initial best
+        best_iteration = start_iteration
+        print(f"Resumed from iteration {start_iteration}")
+        print(f"Checkpoint test loss: {checkpoint['test_loss']:.6f}")
 else:
     print("\nStarting training from scratch")
 
