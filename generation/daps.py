@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from tqdm import tqdm
-import os # Added for auto-detection
+import os  # Added for auto-detection
 
 from training.dataset_utils import DatasetNormalizer
 
@@ -12,40 +12,41 @@ from .base import PDESolver
 from generation.observation import FNO  # For FNO surrogate
 from training.networks import SongUNO  # For UNO surrogate
 
+
 # Custom FNO_pad class to match training architecture
 class FNO_pad(FNO):
     def forward(self, x):
         res_2 = x.shape[-1] // 2
-        x = F.pad(x, (res_2, res_2, res_2, res_2), mode='reflect')
+        x = F.pad(x, (res_2, res_2, res_2, res_2), mode="reflect")
         ret = super().forward(x)
         ret = ret[:, :, res_2:-res_2, res_2:-res_2]
         return ret
+
 
 # Wrapper class to make SongUNO compatible with direct forward prediction
 class SongUNOWrapper(torch.nn.Module):
     def __init__(self, *args, **kwargs):
         super().__init__()
         self.model = SongUNO(*args, **kwargs)
-        
+
     def forward(self, x):
         # Create dummy noise_labels and class_labels for training
         batch_size = x.shape[0]
         device = x.device
-        
+
         # Create dummy noise_labels (timestep 0 for deterministic prediction)
         noise_labels = torch.zeros(batch_size, device=device)
-        
+
         # Create dummy class_labels (unconditional)
         class_labels = torch.zeros(batch_size, 0, device=device)  # Empty class labels
-        
+
         return self.model(x, noise_labels, None)
 
 
-def compute_dynamic_langevin_steps(annealing_step, total_annealing_steps, base_langevin_steps, 
-                                  decay_type="exponential", decay_rate=0.5, min_steps=1):
+def compute_dynamic_langevin_steps(annealing_step, total_annealing_steps, base_langevin_steps, decay_type="exponential", decay_rate=0.5, min_steps=1):
     """
     Compute the number of Langevin steps dynamically based on the annealing step.
-    
+
     Args:
         annealing_step (int): Current annealing step (0-indexed)
         total_annealing_steps (int): Total number of annealing steps
@@ -53,19 +54,19 @@ def compute_dynamic_langevin_steps(annealing_step, total_annealing_steps, base_l
         decay_type (str): Type of decay function ("exponential", "linear", "polynomial", "step", "sigmoid", "increasing")
         decay_rate (float): Decay rate parameter (0-1) or increase multiplier for "increasing"
         min_steps (int): Minimum number of Langevin steps
-    
+
     Returns:
         int: Number of Langevin steps for the current annealing step
     """
     if annealing_step >= total_annealing_steps:
         return min_steps
-    
+
     # Normalize step to [0, 1]
     step_ratio = annealing_step / total_annealing_steps
-    
+
     if decay_type == "exponential":
         # Exponential decay: steps = base_steps * (decay_rate ^ step_ratio)
-        steps = int(base_langevin_steps * (decay_rate ** step_ratio))
+        steps = int(base_langevin_steps * (decay_rate**step_ratio))
     elif decay_type == "linear":
         # Linear decay: steps = base_steps * (1 - step_ratio * (1 - decay_rate))
         steps = int(base_langevin_steps * (1 - step_ratio * (1 - decay_rate)))
@@ -99,17 +100,15 @@ def compute_dynamic_langevin_steps(annealing_step, total_annealing_steps, base_l
             steps = int(base_langevin_steps * 0.2)
     else:
         raise ValueError(f"Unknown decay_type: {decay_type}")
-    
+
     # print(f"Langevin steps: {steps}")
     return max(steps, min_steps)
 
 
-def compute_dynamic_learning_rate(annealing_step, total_annealing_steps, base_lr, 
-                                 lr_schedule="warmup_decay", lr_decay_rate=0.3, 
-                                 lr_min_ratio=0.01, lr_warmup_steps=10):
+def compute_dynamic_learning_rate(annealing_step, total_annealing_steps, base_lr, lr_schedule="warmup_decay", lr_decay_rate=0.3, lr_min_ratio=0.01, lr_warmup_steps=10):
     """
     Compute the learning rate dynamically based on the annealing step.
-    
+
     Args:
         annealing_step (int): Current annealing step (0-indexed)
         total_annealing_steps (int): Total number of annealing steps
@@ -118,19 +117,19 @@ def compute_dynamic_learning_rate(annealing_step, total_annealing_steps, base_lr
         lr_decay_rate (float): Learning rate decay rate (0-1)
         lr_min_ratio (float): Minimum learning rate ratio relative to base_lr
         lr_warmup_steps (int): Number of warmup steps (learning rate increases then decreases)
-    
+
     Returns:
         float: Learning rate for the current annealing step
     """
     if annealing_step >= total_annealing_steps:
         return base_lr * lr_min_ratio
-    
+
     # Normalize step to [0, 1]
     step_ratio = annealing_step / total_annealing_steps
-    
+
     if lr_schedule == "exponential":
         # Exponential decay: lr = base_lr * (lr_decay_rate ^ step_ratio)
-        lr = base_lr * (lr_decay_rate ** step_ratio)
+        lr = base_lr * (lr_decay_rate**step_ratio)
     elif lr_schedule == "linear":
         # Linear decay: lr = base_lr * (1 - step_ratio * (1 - lr_decay_rate))
         lr = base_lr * (1 - step_ratio * (1 - lr_decay_rate))
@@ -159,7 +158,7 @@ def compute_dynamic_learning_rate(annealing_step, total_annealing_steps, base_lr
             lr = base_lr * (1 - decay_ratio * (1 - lr_decay_rate))
     else:
         raise ValueError(f"Unknown lr_schedule: {lr_schedule}")
-    
+
     # Ensure learning rate doesn't go below minimum
     print(f"Learning rate: {lr}")
     return max(lr, base_lr * lr_min_ratio)
@@ -240,9 +239,9 @@ class Scheduler(nn.Module):
 
 class PDESolverDAPS(PDESolver):
     """PDESolver implementation using Decoupled Annealing Posterior Sampling (DAPS).
-    
+
     This implementation is now adaptable to FNO, FNO_pad, and SongUNO surrogate models.
-    
+
     Configuration options:
         - surrogate_type (str): Type of surrogate model to use. Options:
             - "auto" (default): Automatically detects the best available model
@@ -250,12 +249,12 @@ class PDESolverDAPS(PDESolver):
             - "fno_pad": Uses FNO_pad surrogate model (recommended for Helmholtz equation)
             - "uno": Uses UNO surrogate model with SongUNOWrapper
         - dataset (str): Dataset name for loading the appropriate trained surrogate model
-        
+
     Auto-detection priority (when surrogate_type="auto"):
         1. SongUNO (uno_trained_forward_{dataset}.pth)
-        2. FNO_pad (fno_pad_trained_forward_{dataset}.pth) 
+        2. FNO_pad (fno_pad_trained_forward_{dataset}.pth)
         3. FNO (fno_trained_forward_{dataset}.pth)
-        
+
     Example config:
         config = {
             "surrogate_type": "fno_pad",  # Use FNO_pad surrogate
@@ -322,7 +321,7 @@ class PDESolverDAPS(PDESolver):
             else:
                 surrogate_type = "fno"  # Default fallback
                 print("No specific model found, defaulting to FNO")
-        
+
         if surrogate_type.lower() == "uno":
             # Initialize UNO surrogate with optimal configuration from training_fno.py
             self.surrogate = SongUNOWrapper(
@@ -341,73 +340,36 @@ class PDESolverDAPS(PDESolver):
             model_path = f"generation/uno_trained_forward_{config['dataset']}.pth"
         elif surrogate_type.lower() == "fno_pad":
             # Initialize FNO_pad surrogate (recommended for Helmholtz equation)
-            self.surrogate = FNO_pad(
-                n_modes=(64, 64),
-                in_channels=1,
-                out_channels=1,
-                hidden_channels=64,
-                n_layers=4
-            )
-            model_path = f"generation/fno_pad_trained_forward_{config['dataset']}_128_400.pth"
+            self.surrogate = FNO_pad(n_modes=(64, 64), in_channels=1, out_channels=1, hidden_channels=64, n_layers=4)
+            model_path = f"generation/thomas/fno_pad_trained_forward_{config['dataset']}_128_400.pth"
         elif surrogate_type.lower() == "fno_pad_scarce":
-            self.surrogate = FNO_pad(
-                n_modes=(64, 64),
-                in_channels=1,
-                out_channels=1,
-                hidden_channels=64,
-                n_layers=4
-            )
-            model_path = f"generation/fno_pad_trained_forward_{config['dataset']}_128_scarce_10000_200.pth"
+            self.surrogate = FNO_pad(n_modes=(32, 32), in_channels=1, out_channels=1, hidden_channels=64, n_layers=4)
+            model_path = f"exps/run_20260125_134143_t4gajfcs/best_model.pth"
         elif surrogate_type.lower() == "fno_pad_64":
-            self.surrogate = FNO_pad(
-                n_modes=(32, 32),
-                in_channels=1,
-                out_channels=1,
-                hidden_channels=64,
-                n_layers=4
-            )
+            self.surrogate = FNO_pad(n_modes=(32, 32), in_channels=1, out_channels=1, hidden_channels=64, n_layers=4)
             model_path = f"generation/fno_pad_trained_forward_{config['dataset']}_64.pth"
         elif surrogate_type.lower() == "fno_pad_mix":
-            self.surrogate = FNO_pad(
-                n_modes=(32, 32),
-                in_channels=1,
-                out_channels=1,
-                hidden_channels=64,
-                n_layers=4
-            )
+            self.surrogate = FNO_pad(n_modes=(32, 32), in_channels=1, out_channels=1, hidden_channels=64, n_layers=4)
             model_path = f"generation/fno_pad_trained_forward_{config['dataset']}_mix.pth"
-        elif surrogate_type.lower() == "pino":
-            self.surrogate = Pino(
-                n_modes=(64, 64),
-                in_channels=1,
-                out_channels=1,
-                hidden_channels=64,
-                n_layers=4
-            )
-            model_path = f"generation/pino_trained_forward_{config['dataset']}.pth"
         else:
             # Default to FNO surrogate
             print("Using Default FNO surrogate")
-            self.surrogate = FNO(
-                n_modes=(64, 64),
-                in_channels=1,
-                out_channels=1,
-                hidden_channels=64,
-                n_layers=4
-            )
+            self.surrogate = FNO(n_modes=(64, 64), in_channels=1, out_channels=1, hidden_channels=64, n_layers=4)
             model_path = f"generation/fno_trained_forward_{config['dataset']}.pth"
-        
+
         # Load trained forward surrogate
-        print(f'Using surrogate path: {model_path}')
+        print(f"Using surrogate path: {model_path}")
         try:
             # Check if weights_only is supported (PyTorch >= 1.13.0)
-            if hasattr(torch, '__version__') and torch.__version__ >= '1.13.0':
+            if hasattr(torch, "__version__") and torch.__version__ >= "1.13.0":
                 state_dict = torch.load(model_path, weights_only=True)
             else:
                 state_dict = torch.load(model_path)
         except Exception:
             state_dict = torch.load(model_path)
-        
+
+        if "model_state_dict" in state_dict:
+            state_dict = state_dict["model_state_dict"]
         self.surrogate.load_state_dict(state_dict)
         self.surrogate.to(self.device)
         self.surrogate.eval()
@@ -458,7 +420,7 @@ class PDESolverDAPS(PDESolver):
                 denorm_x0y = self.normalizer.denormalize(x0y, channel=channel)
                 denorm_xt = self.normalizer.denormalize(xt, channel=channel)
                 intermediates.append(torch.cat([denorm_x0, denorm_x0y, denorm_xt], dim=1))
-                
+
                 if intermediates_channel_index is None:
                     C1 = denorm_x0.shape[1]
                     C2 = denorm_x0y.shape[1]
@@ -538,11 +500,7 @@ class PDESolverDAPS(PDESolver):
         # Calculate learning rate with dynamic control
         if self.dynamic_lr:
             # Use dynamic learning rate control
-            current_lr = compute_dynamic_learning_rate(
-                annealing_step, self.num_steps, self.lr,
-                self.lr_schedule, self.lr_decay_rate, 
-                self.lr_min_ratio, self.lr_warmup_steps
-            )
+            current_lr = compute_dynamic_learning_rate(annealing_step, self.num_steps, self.lr, self.lr_schedule, self.lr_decay_rate, self.lr_min_ratio, self.lr_warmup_steps)
         else:
             # Use original adaptive learning rate
             multiplier = (1 ** (1 / rho) + ratio * (self.lr_min_ratio ** (1 / rho) - 1 ** (1 / rho))) ** rho
@@ -550,10 +508,7 @@ class PDESolverDAPS(PDESolver):
 
         # Dynamic Langevin step control
         if self.dynamic_langevin:
-            current_langevin_steps = compute_dynamic_langevin_steps(
-                annealing_step, self.num_steps, self.langevin_steps,
-                self.langevin_decay_type, self.langevin_decay_rate, self.langevin_min_steps
-            )
+            current_langevin_steps = compute_dynamic_langevin_steps(annealing_step, self.num_steps, self.langevin_steps, self.langevin_decay_type, self.langevin_decay_rate, self.langevin_min_steps)
         else:
             current_langevin_steps = self.langevin_steps
 
@@ -570,7 +525,7 @@ class PDESolverDAPS(PDESolver):
                 device = x.device
                 self.surrogate = self.surrogate.to(device)
                 x_for_sur = x.to(dtype=torch.float32, device=device)
-                sol_pred = self.surrogate(x_for_sur)            # autograd tracks w.r.t. x
+                sol_pred = self.surrogate(x_for_sur)  # autograd tracks w.r.t. x
                 x_for_loss = torch.cat([x_for_sur, sol_pred], dim=1)  # [B,2,H,W]
             else:
                 x_for_loss = x

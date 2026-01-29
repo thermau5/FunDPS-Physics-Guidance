@@ -7,11 +7,11 @@ dataset: 'poisson'
 data_path: 'data/DiffPDE/poisson_test_hf'
 data_offset: null
 resolution: 128  # downsampled resolution, defaults to dataset resolution
-max_size: 12 # maximum number of samples to use, defaults to one epoch
+max_size: 100 # maximum number of samples to use, defaults to one epoch
 batch_size: 12
 
 # Model options
-pkl_path: '__required__'
+pkl_path: 'generation/thomas/Poisson_Multi_one_channel_F2/network-snapshot-10016064.pkl'
 rbf_scale: 0.05
 
 # Generation options
@@ -48,7 +48,7 @@ observation:
   # upsampling_step: 200
 guidance:
   type: "daps"
-  surrogate_type: "fno_pad" # fno, fno_pad, fno_pad_mix, uno
+  surrogate_type: "fno_pad_scarce" # fno, fno_pad, fno_pad_mix, uno
   # Super-resolution guidance
   sigma_min_1: 0.005
   sigma_max_2: 5

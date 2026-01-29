@@ -103,9 +103,11 @@ class PDESolver:
             metrics = self.calculate_metrics(pred, gt)
 
             self.update_stats(metrics)
-            if i == 0:
-                print("Metrics for first batch:")
-                self.finalize_stats(save_dir=None)
+            # if i == 0:
+            #     print("Metrics for first batch:")
+            #     self.finalize_stats(save_dir=None)
+            print(f"Completed batch {i+1}/{len(self.dataloader)}")
+            self.finalize_stats(save_dir=None)
 
             self.save_results(pred, f"{self.save_dir}/results/batch_{i}.npy")
             self.plot_results(pred, gt, metrics, self.save_dir)
