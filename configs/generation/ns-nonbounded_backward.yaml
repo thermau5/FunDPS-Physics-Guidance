@@ -8,7 +8,7 @@ data_path: 'data/DiffPDE/ns-nonbounded_test_hf'
 data_offset: null
 resolution: 128  # downsampled resolution, defaults to dataset resolution
 max_size: 12  # maximum number of samples to use, defaults to one epoch
-batch_size: 12
+batch_size: 12  # full batch = 1000
 
 # Model options
 pkl_path: '__required__'
@@ -87,4 +87,5 @@ guidance:
 # I/O-related
 n_plots: 4  # number of samples to plot
 n_process_steps: 10  # number of steps to plot process
+plot_spectral_energy: true  # enable spectral energy plots comparing predicted vs ground truth
 wandb: "offline"
