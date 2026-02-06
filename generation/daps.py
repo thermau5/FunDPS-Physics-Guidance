@@ -12,6 +12,20 @@ from .base import PDESolver
 from generation.observation import FNO  # For FNO surrogate
 from training.networks import SongUNO  # For UNO surrogate
 
+# Import numerical Poisson solver
+try:
+    import sys
+    import os
+    # Add parent directory to path to import poisson_numerical_solver
+    parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if parent_dir not in sys.path:
+        sys.path.insert(0, parent_dir)
+    from poisson_numerical_solver import forward_poisson
+    HAS_NUMERICAL_POISSON = True
+except ImportError as e:
+    print(f"Warning: Could not import numerical Poisson solver: {e}")
+    HAS_NUMERICAL_POISSON = False
+
 # Custom FNO_pad class to match training architecture
 class FNO_pad(FNO):
     def forward(self, x):
@@ -39,6 +53,137 @@ class SongUNOWrapper(torch.nn.Module):
         class_labels = torch.zeros(batch_size, 0, device=device)  # Empty class labels
         
         return self.model(x, noise_labels, None)
+
+
+# Wrapper class for numerical Poisson solver (GPU-accelerated)
+class NumericalPoissonWrapper(torch.nn.Module):
+    """GPU-accelerated wrapper for numerical Poisson solver using PyTorch.
+    
+    Takes input tensor [B, 1, H, W] (source term f) and returns [B, 1, H, W] (solution φ).
+    Supports gradients through torch.linalg.solve, allowing backpropagation w.r.t. inputs.
+    Parallel to FNO/FNO_pad in terms of forward operator usage and gradient flow.
+    """
+    def __init__(self):
+        super().__init__()
+        # Cache sparse and dense matrices for different grid sizes (lazy initialization)
+        self._sparse_matrix_cache = {}
+        self._dense_matrix_cache = {}
+    
+    def _build_poisson_matrix(self, S, device, dtype):
+        """Build the sparse Poisson matrix A for grid size S on the given device.
+        
+        The matrix represents: A @ phi_vec = f_vec where Δφ = f
+        """
+        cache_key = (S, device, dtype)
+        if cache_key in self._sparse_matrix_cache:
+            return self._sparse_matrix_cache[cache_key]
+        
+        h = 1.0 / (S - 1)
+        N = S * S
+        
+        # Build indices and values for sparse matrix
+        indices = []
+        values = []
+        
+        for i in range(S):
+            for j in range(S):
+                k = i * S + j  # linear index
+                
+                # Dirichlet boundary: φ = 0
+                if i == 0 or i == S - 1 or j == 0 or j == S - 1:
+                    indices.append([k, k])
+                    values.append(1.0)
+                else:
+                    # Interior points: 5-point stencil
+                    indices.append([k, k])          # center
+                    values.append(-4.0 / h**2)
+                    
+                    indices.append([k, k - 1])      # left (i, j-1)
+                    values.append(1.0 / h**2)
+                    
+                    indices.append([k, k + 1])      # right (i, j+1)
+                    values.append(1.0 / h**2)
+                    
+                    indices.append([k, k - S])      # down (i-1, j)
+                    values.append(1.0 / h**2)
+                    
+                    indices.append([k, k + S])      # up (i+1, j)
+                    values.append(1.0 / h**2)
+        
+        # Convert to tensors
+        indices_tensor = torch.tensor(indices, dtype=torch.long, device=device).t()
+        values_tensor = torch.tensor(values, dtype=dtype, device=device)
+        
+        # Create sparse matrix in COO format, then convert to CSR for efficient solving
+        A_sparse = torch.sparse_coo_tensor(indices_tensor, values_tensor, (N, N))
+        A_sparse = A_sparse.coalesce()  # Sort indices and sum duplicates
+        
+        # Cache the sparse matrix
+        self._sparse_matrix_cache[cache_key] = A_sparse
+        
+        return A_sparse
+    
+    def _get_dense_matrix(self, S, device, dtype):
+        """Get dense version of Poisson matrix (cached).
+        
+        Note: The matrix itself is built from constant values (no gradients needed),
+        but gradients will flow through torch.linalg.solve w.r.t. the input tensor.
+        This is parallel to how FNO/FNO_pad work: fixed weights, gradients flow through inputs.
+        """
+        cache_key = (S, device, dtype)
+        if cache_key in self._dense_matrix_cache:
+            return self._dense_matrix_cache[cache_key]
+        
+        # Get sparse matrix and convert to dense
+        A_sparse = self._build_poisson_matrix(S, device, dtype)
+        A_dense = A_sparse.to_dense()
+        
+        # Matrix is built from constants, so naturally doesn't require gradients
+        # torch.linalg.solve will still compute gradients w.r.t. the right-hand side (input)
+        
+        # Cache the dense matrix
+        self._dense_matrix_cache[cache_key] = A_dense
+        
+        return A_dense
+    
+    def forward(self, x):
+        """
+        Args:
+            x: Tensor of shape [B, 1, H, W] where B is batch size, H=W is resolution
+               Represents the source term f(x,y)
+        
+        Returns:
+            Tensor of shape [B, 1, H, W] representing the solution φ(x,y) = Δ^(-1) f
+        """
+        if x.dim() != 4 or x.shape[1] != 1:
+            raise ValueError(f"Expected input shape [B, 1, H, W], got {x.shape}")
+        
+        batch_size, channels, height, width = x.shape
+        if height != width:
+            raise ValueError(f"Expected square grid, got {height}x{width}")
+        
+        S = height
+        device = x.device
+        dtype = x.dtype
+        
+        # Get cached dense matrix for efficient batched solving
+        # For large grids, this uses more memory but allows batched GPU operations
+        A_dense = self._get_dense_matrix(S, device, dtype)  # [N, N]
+        
+        # Reshape input: [B, 1, H, W] -> [B, H*W]
+        f_vec = x.view(batch_size, -1)  # [B, N]
+        
+        # Batch solve: A_dense @ phi_vec = f_vec
+        # A_dense: [N, N], f_vec: [B, N] -> phi_vec: [B, N]
+        # Transpose f_vec to [N, B], solve, then transpose back
+        f_vec_t = f_vec.t()  # [N, B]
+        phi_vec_t = torch.linalg.solve(A_dense, f_vec_t)  # [N, B]
+        phi_vec = phi_vec_t.t()  # [B, N]
+        
+        # Reshape: [B, N] -> [B, 1, H, W]
+        phi = phi_vec.view(batch_size, 1, height, width)
+        
+        return phi
 
 
 def compute_dynamic_langevin_steps(annealing_step, total_annealing_steps, base_langevin_steps, 
@@ -241,7 +386,7 @@ class Scheduler(nn.Module):
 class PDESolverDAPS(PDESolver):
     """PDESolver implementation using Decoupled Annealing Posterior Sampling (DAPS).
     
-    This implementation is now adaptable to FNO, FNO_pad, and SongUNO surrogate models.
+    This implementation is now adaptable to FNO, FNO_pad, SongUNO, and numerical Poisson solver.
     
     Configuration options:
         - surrogate_type (str): Type of surrogate model to use. Options:
@@ -249,17 +394,20 @@ class PDESolverDAPS(PDESolver):
             - "fno": Uses standard FNO surrogate model
             - "fno_pad": Uses FNO_pad surrogate model (recommended for Helmholtz equation)
             - "uno": Uses UNO surrogate model with SongUNOWrapper
+            - "pino": Uses PINO surrogate model
+            - "numerical_poisson": Uses numerical Poisson solver (no training required, for Poisson dataset only)
         - dataset (str): Dataset name for loading the appropriate trained surrogate model
         
     Auto-detection priority (when surrogate_type="auto"):
         1. SongUNO (uno_trained_forward_{dataset}.pth)
         2. FNO_pad (fno_pad_trained_forward_{dataset}.pth) 
         3. FNO (fno_trained_forward_{dataset}.pth)
+        4. Numerical Poisson (if dataset="poisson" and solver available)
         
     Example config:
         config = {
-            "surrogate_type": "fno_pad",  # Use FNO_pad surrogate
-            "dataset": "helmholtz",
+            "surrogate_type": "numerical_poisson",  # Use numerical Poisson solver
+            "dataset": "poisson",
             # ... other config options
         }
     """
@@ -296,7 +444,6 @@ class PDESolverDAPS(PDESolver):
         # assert self.num_steps == self.annealing_config["num_steps"]
         self.num_steps = self.annealing_config["num_steps"]
         self.save_indices = np.linspace(0, self.num_steps - 1, self.n_process_steps, dtype=int)
-        assert self.observations[0].type == "sparse"
 
         # ADDED: forward surrogate to synthesize the second channel when DM is one-channel
         # Make it adaptable to FNO, FNO_pad, and SongUNO based on configuration and available models
@@ -319,6 +466,9 @@ class PDESolverDAPS(PDESolver):
             elif f"generation/pino_trained_forward_{config['dataset']}.pth" in os.listdir("generation"):
                 surrogate_type = "pino"
                 print("Auto-detected PINO surrogate model")
+            elif HAS_NUMERICAL_POISSON and config.get('dataset', '').lower() == 'poisson':
+                surrogate_type = "numerical_poisson"
+                print("Auto-detected numerical Poisson solver for Poisson dataset")
             else:
                 surrogate_type = "fno"  # Default fallback
                 print("No specific model found, defaulting to FNO")
@@ -351,13 +501,13 @@ class PDESolverDAPS(PDESolver):
             model_path = f"generation/fno_pad_trained_forward_{config['dataset']}_128_400.pth"
         elif surrogate_type.lower() == "fno_pad_scarce":
             self.surrogate = FNO_pad(
-                n_modes=(64, 64),
+                n_modes=(32, 32),
                 in_channels=1,
                 out_channels=1,
                 hidden_channels=64,
                 n_layers=4
             )
-            model_path = f"generation/fno_pad_trained_forward_{config['dataset']}_128_scarce_10000_200.pth"
+            model_path = f"generation/fno_pad_trained_forward_{config['dataset']}_128_400_scarce500.pth"
         elif surrogate_type.lower() == "fno_pad_64":
             self.surrogate = FNO_pad(
                 n_modes=(32, 32),
@@ -385,6 +535,16 @@ class PDESolverDAPS(PDESolver):
                 n_layers=4
             )
             model_path = f"generation/pino_trained_forward_{config['dataset']}.pth"
+        elif surrogate_type.lower() == "numerical_poisson":
+            # Use numerical Poisson solver (no neural network, no weights to load)
+            if not HAS_NUMERICAL_POISSON:
+                raise ImportError(
+                    "Numerical Poisson solver requested but not available. "
+                    "Ensure poisson_numerical_solver.py is accessible and scipy is installed."
+                )
+            print("Using numerical Poisson solver (no model weights needed)")
+            self.surrogate = NumericalPoissonWrapper()
+            model_path = None  # No model file needed
         else:
             # Default to FNO surrogate
             print("Using Default FNO surrogate")
@@ -397,18 +557,20 @@ class PDESolverDAPS(PDESolver):
             )
             model_path = f"generation/fno_trained_forward_{config['dataset']}.pth"
         
-        # Load trained forward surrogate
-        print(f'Using surrogate path: {model_path}')
-        try:
-            # Check if weights_only is supported (PyTorch >= 1.13.0)
-            if hasattr(torch, '__version__') and torch.__version__ >= '1.13.0':
-                state_dict = torch.load(model_path, weights_only=True)
-            else:
+        # Load trained forward surrogate (skip for numerical solver)
+        if model_path is not None:
+            print(f'Using surrogate path: {model_path}')
+            try:
+                # Check if weights_only is supported (PyTorch >= 1.13.0)
+                if hasattr(torch, '__version__') and torch.__version__ >= '1.13.0':
+                    state_dict = torch.load(model_path, weights_only=True)
+                else:
+                    state_dict = torch.load(model_path)
+            except Exception:
                 state_dict = torch.load(model_path)
-        except Exception:
-            state_dict = torch.load(model_path)
+            
+            self.surrogate.load_state_dict(state_dict)
         
-        self.surrogate.load_state_dict(state_dict)
         self.surrogate.to(self.device)
         self.surrogate.eval()
         self.surrogate.requires_grad_(False)  # freeze weights; gradients still flow to inputs
@@ -566,11 +728,15 @@ class PDESolverDAPS(PDESolver):
             prior_loss = ((x - x0hat.detach()) ** 2).sum()
 
             # ADDED: if DM state is one-channel, concatenate surrogate-predicted solution channel
+            # This forward operator usage is parallel for FNO, FNO_pad, and numerical Poisson solver:
+            # - Forward pass: compute solution from source term
+            # - Gradients flow through: autograd tracks w.r.t. x (inputs)
+            # - Loss computation and backpropagation: same pattern for all surrogates
             if x.shape[1] == 1:
                 device = x.device
                 self.surrogate = self.surrogate.to(device)
                 x_for_sur = x.to(dtype=torch.float32, device=device)
-                sol_pred = self.surrogate(x_for_sur)            # autograd tracks w.r.t. x
+                sol_pred = self.surrogate(x_for_sur)            # autograd tracks w.r.t. x (parallel to FNO/FNO_pad)
                 x_for_loss = torch.cat([x_for_sur, sol_pred], dim=1)  # [B,2,H,W]
             else:
                 x_for_loss = x
