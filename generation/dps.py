@@ -94,26 +94,56 @@ class PDESolverDPS(PDESolver):
                 n_layers=4
             )
             model_path = f"generation/fno_pad_trained_forward_{config['dataset']}.pth"
+        elif surrogate_type.lower() == "fno_pad_scarce":
+            self.surrogate = FNO_pad(
+                n_modes=(32, 32),
+                in_channels=1,
+                out_channels=1,
+                hidden_channels=64,
+                n_layers=4
+            )
+            model_path = f"generation/fno_pad_trained_forward_{config['dataset']}_128_400_scarce500.pth"
+        elif surrogate_type.lower() == "fno_pad_64":
+            self.surrogate = FNO_pad(
+                n_modes=(32, 32),
+                in_channels=1,
+                out_channels=1,
+                hidden_channels=64,
+                n_layers=4
+            )
+            model_path = f"generation/fno_pad_trained_forward_{config['dataset']}_64.pth"
+        elif surrogate_type.lower() == "fno_pad_mix":
+            self.surrogate = FNO_pad(
+                n_modes=(32, 32),
+                in_channels=1,
+                out_channels=1,
+                hidden_channels=64,
+                n_layers=4
+            )
+            model_path = f"generation/fno_pad_trained_forward_{config['dataset']}_mix.pth"
         else:
             # Surrogate Not Specified/Used
             self.surrogate = None
             model_path = None
-            return None
+            print(f"Warning: surrogate_type '{surrogate_type}' not recognized. Surrogate will not be used.")
+            return
             
-        # Load trained forward surrogate
-        try:
-            # Check if weights_only is supported (PyTorch >= 1.13.0)
-            if hasattr(torch, '__version__') and torch.__version__ >= '1.13.0':
-                state_dict = torch.load(model_path, weights_only=True)
-            else:
+        # Load trained forward surrogate (skip if surrogate is None)
+        if self.surrogate is not None and model_path is not None:
+            print(f'Using surrogate path: {model_path}')
+            try:
+                # Check if weights_only is supported (PyTorch >= 1.13.0)
+                if hasattr(torch, '__version__') and torch.__version__ >= '1.13.0':
+                    state_dict = torch.load(model_path, weights_only=True)
+                else:
+                    state_dict = torch.load(model_path)
+            except Exception:
                 state_dict = torch.load(model_path)
-        except Exception:
-            state_dict = torch.load(model_path)
-        
-        self.surrogate.load_state_dict(state_dict)
-        self.surrogate.to(self.device)
-        self.surrogate.eval()
-        self.surrogate.requires_grad_(False)  # freeze weights; gradients still flow to inputs
+            
+            self.surrogate.load_state_dict(state_dict)
+            self.surrogate.to(self.device)
+            self.surrogate.eval()
+            self.surrogate.requires_grad_(False)  # freeze weights; gradients still flow to inputs
 
     def load_data(self):
         super().load_data()
@@ -165,6 +195,8 @@ class PDESolverDPS(PDESolver):
 
             # Concatenate into two channel
             if x_N.shape[1] == 1:
+                if self.surrogate is None:
+                    raise ValueError("Cannot concatenate channels: surrogate model is None. Please specify a valid surrogate_type in the config.")
                 # Predict the second channel using the surrogate
                 # Make sure x_N is the correct dtype and device for the surrogate
                 device = x_N.device
@@ -245,6 +277,8 @@ class PDESolverDPS(PDESolver):
         x_final = x_next.detach()
 
         if x_final.shape[1] == 1:
+            if self.surrogate is None:
+                raise ValueError("Cannot concatenate channels: surrogate model is None. Please specify a valid surrogate_type in the config.")
             # Predict the second channel using the surrogate
             device = x_final.device
             x_final = x_final.to(dtype=torch.float32, device=device)
