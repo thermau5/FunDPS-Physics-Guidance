@@ -559,16 +559,22 @@ class PDESolverDAPS(PDESolver):
         
         # Load trained forward surrogate (skip for numerical solver)
         if model_path is not None:
-            print(f'Using surrogate path: {model_path}')
+            print(f"Using surrogate path: {model_path}")
             try:
-                # Check if weights_only is supported (PyTorch >= 1.13.0)
-                if hasattr(torch, '__version__') and torch.__version__ >= '1.13.0':
-                    state_dict = torch.load(model_path, weights_only=True)
-                else:
-                    state_dict = torch.load(model_path)
-            except Exception:
+                # Prefer safe loading first (PyTorch >= 1.13 with weights_only)
+                state_dict = torch.load(model_path, weights_only=True)
+            except TypeError:
+                # Older PyTorch without weights_only argument
                 state_dict = torch.load(model_path)
-            
+            except Exception as e:
+                # Safe loading failed (e.g. legacy checkpoints); explicit unsafe fallback
+                print(
+                    f"Warning: safe torch.load(weights_only=True) failed with "
+                    f"{type(e).__name__}: {e}. Falling back to weights_only=False; "
+                    "only do this for trusted checkpoints."
+                )
+                state_dict = torch.load(model_path, weights_only=False)
+
             self.surrogate.load_state_dict(state_dict)
         
         self.surrogate.to(self.device)

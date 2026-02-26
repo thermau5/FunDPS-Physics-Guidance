@@ -23,24 +23,24 @@ from tqdm import tqdm
 
 # Dataset configuration
 PDE_DIRECTION = "forward"  # 'forward' or 'inverse'
-DATASET_NAME = "ns-nonbounded"  # Dataset name for saving/loading models
+DATASET_NAME = "poisson"  # Dataset name for saving/loading models
 DATA_RESOLUTION = 128  # Original data resolution
 TRAIN_RESOLUTION = (128, 128)  # Training resolution (downsampled)   # To change
 
 # Training configuration
 BATCH_SIZE = 40
-NUM_EPOCHS = 400
+NUM_EPOCHS = 500
 LEARNING_RATE = 1e-4
 
 # Model configuration
-FNO_MODES = (32, 32)  # To change
+FNO_MODES = (64, 64)  # To change
 IN_CHANNELS = 1
 OUT_CHANNELS = 1
 HIDDEN_CHANNELS = 64
 N_LAYERS = 4
 
 # Wandb configuration
-WANDB_PROJECT = "fundps-physics-guidance"
+WANDB_PROJECT = "ddis_fno_edm_no"
 
 # ==============================================
 
@@ -103,8 +103,17 @@ model = model.to(device)
 num_params = sum(p.numel() for p in model.parameters())
 print(f"Number of parameters in the model: {num_params}")
 
+run_name = (
+    f"fno_{DATASET_NAME}_{PDE_DIRECTION}"
+    f"_bs{BATCH_SIZE}"
+    f"_ep{NUM_EPOCHS}"
+    f"_m{FNO_MODES[0]}"
+    f"_p{num_params/1e6:.0f}M"
+)
+
 wandb.init(
     project=WANDB_PROJECT,
+    name=run_name,
     config={
         "dataset": DATASET_NAME,
         "pde_direction": PDE_DIRECTION,
@@ -116,6 +125,7 @@ wandb.init(
         "fno_modes": FNO_MODES,
         "hidden_channels": HIDDEN_CHANNELS,
         "n_layers": N_LAYERS,
+        "num_params": num_params,
     },
 )
 
@@ -306,7 +316,7 @@ for epoch in range(NUM_EPOCHS):
     print("-" * 80)
 
 # Save model
-model_path = f"generation/fno_pad_trained_{PDE_DIRECTION}_{DATASET_NAME}_{list(TRAIN_RESOLUTION)[0]}_400.pth"
+model_path = f"generation/fno_pad_trained_{PDE_DIRECTION}_{DATASET_NAME}_{list(TRAIN_RESOLUTION)[0]}_{NUM_EPOCHS}.pth"
 torch.save(model.state_dict(), model_path)
 print(f"Model saved to: {model_path}")
 
