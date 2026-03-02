@@ -1,0 +1,115 @@
+# Cross-platform environment for `edm_no` (x86_64 and aarch64/ARM64).
+# Conda: only top-level deps; no build strings. Omitted: pytorch-scatter (from pyg in original;
+# install separately if needed: pip install torch-scatter). Pip: same list as environment.yml,
+# no version pins; triton omitted (no aarch64 wheel).
+#
+# On VISTA aarch64 GPU nodes, after creating this env run:
+#   python -m pip install --force-reinstall --no-deps \
+#     torch torchvision torchaudio \
+#     --index-url https://download.pytorch.org/whl/cu124
+# as documented in the README. On x86_64 with NVIDIA GPUs (e.g., RTX 4090),
+# you can alternatively use `environment.yml` for a more tightly pinned setup.
+name: edm_no
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pytorch=2.7.1
+  - numpy
+  - scipy
+  - pillow
+  - numcodecs  # from conda-forge (pre-built); avoids building with nvc on aarch64
+  - pip
+  - pip:
+      - aiohappyeyeballs
+      - aiohttp
+      - aiosignal
+      - antlr4-python3-runtime
+      - asciitree
+      - asttokens
+      - async-timeout
+      - attrs
+      - beautifulsoup4
+      - black
+      - configmypy
+      - contourpy
+      - cycler
+      - datasets
+      - decorator
+      - dill
+      - docker-pycreds
+      - einops
+      - exceptiongroup
+      - executing
+      - fasteners
+      - filelock
+      - fonttools
+      - frozenlist
+      - fsspec
+      - gdown
+      - gitdb
+      - gitpython
+      - h5py
+      - huggingface-hub
+      - imageio
+      - imageio-ffmpeg
+      - importlib-resources
+      - iniconfig
+      - ipython
+      - jedi
+      - jstyleson
+      - kiwisolver
+      - matplotlib
+      - matplotlib-inline
+      - multidict
+      - multiprocess
+      - mypy-extensions
+      - omegaconf
+      - opencv-python
+      - opt-einsum
+      - packaging
+      - pandas
+      - parso
+      - pathspec
+      - pexpect
+      - platformdirs
+      - pluggy
+      - prompt-toolkit
+      - propcache
+      - protobuf
+      - ptyprocess
+      - pure-eval
+      - pyarrow
+      - pygments
+      - pyparsing
+      - pyspng
+      - pytest
+      - pytest-mock
+      - python-dateutil
+      - pytz
+      - pyyaml
+      - ruamel-yaml
+      - ruamel-yaml-clib
+      - sentry-sdk
+      - setproctitle
+      - six
+      - smmap
+      - soupsieve
+      - stack-data
+      - tensorly
+      - tensorly-torch
+      - tomli
+      # torch/torchvision from conda (pytorch=2.9.1); on aarch64 get cu128 via pip after create
+      - tqdm
+      - traitlets
+      # triton: no wheel on aarch64; omit for cross-platform
+      - tzdata
+      - uv
+      - wandb
+      - wcwidth
+      - xxhash
+      - yarl
+      - zarr
+      - zipp
