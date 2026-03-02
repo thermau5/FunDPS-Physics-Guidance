@@ -182,3 +182,4 @@ ics-dev-v2
 # Data and visualization files
 *.mat
 *.gif
+model/diffusion/poisson/network-snapshot-10016064.pkl
