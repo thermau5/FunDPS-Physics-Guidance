@@ -498,7 +498,7 @@ class PDESolverDAPS(PDESolver):
                 hidden_channels=64,
                 n_layers=4
             )
-            model_path = f"generation/fno_pad_trained_forward_{config['dataset']}_128_400.pth"
+            model_path = f"generation/fno_pad_trained_forward_{config['dataset']}_128_500.pth"
         elif surrogate_type.lower() == "fno_pad_scarce":
             self.surrogate = FNO_pad(
                 n_modes=(32, 32),
