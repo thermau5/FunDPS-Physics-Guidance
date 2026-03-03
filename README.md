@@ -64,9 +64,51 @@ cd ..
 
 ### Download data
 
-Please follow the instructions in [DiffusionPDE](https://github.com/jhhuangchloe/DiffusionPDE) to download the data and place it in the `data/DiffPDE` directory.
+We support both an **automatic Hugging Face download** (recommended) and the **original manual download**.
 
-To generate the data, run:
+- **Option A (recommended, automatic from Hugging Face)**
+
+  This repository includes `utils/download_dataset.py`, which pulls the normalized PDE datasets from the Hugging Face dataset `jcy20/DiffusionPDE-normalized` and places them under `data/DiffPDE`:
+
+  ```shell
+  # From the project root
+  python utils/download_dataset.py all --output-dir data/DiffPDE
+  ```
+
+  - By default this downloads the **training** splits for all supported datasets (`darcy`, `helmholtz`, `ns-bounded`, `ns-nonbounded`, `poisson`).
+  - To download the **test** splits instead, add `--test`:
+
+    ```shell
+    python utils/download_dataset.py all --output-dir data/DiffPDE --test
+    ```
+
+  - You can also download a **single dataset** (train or test) by name, e.g.:
+
+    ```shell
+    # Single dataset (Darcy, train split)
+    python utils/download_dataset.py darcy --output-dir data/DiffPDE
+
+    # Single dataset (Darcy, test split)
+    python utils/download_dataset.py darcy --output-dir data/DiffPDE --test
+    ```
+
+  After this step, you should have a structure like:
+
+  - `data/DiffPDE/darcy_hf`, `data/DiffPDE/darcy_test_hf`
+  - `data/DiffPDE/helmholtz_hf`, `data/DiffPDE/helmholtz_test_hf`
+  - `data/DiffPDE/ns-bounded_hf`, `data/DiffPDE/ns-bounded_test_hf`
+  - `data/DiffPDE/ns-nonbounded_hf`, `data/DiffPDE/ns-nonbounded_test_hf`
+  - `data/DiffPDE/poisson_hf`, `data/DiffPDE/poisson_test_hf`
+
+- **Option B (manual, original DiffusionPDE instructions)**
+
+  You can alternatively follow the original data download instructions in the DiffusionPDE repository and then copy the data into `data/DiffPDE`:
+
+  ```text
+  https://github.com/jhhuangchloe/DiffusionPDE
+  ```
+
+To generate the processed data used by this repo, run:
 
 ```shell
 python utils/dataset_process.py all
