@@ -1,4 +1,4 @@
-# FunctionSpaceDiffusion
+# Decoupled Diffusion Inverse Solver
 
 ## Setup
 
