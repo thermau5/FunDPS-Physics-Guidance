@@ -32,6 +32,13 @@ module load gcc cuda
 conda env create -f environment_platform.yml
 conda activate edm_no
 
+# One-time setup per VISTA machine: always use the env's libstdc++ (fixes GLIBCXX_* issues)
+mkdir -p "$CONDA_PREFIX/etc/conda/activate.d"
+cat >> "$CONDA_PREFIX/etc/conda/activate.d/edm_no_libstdcxx.sh" << 'EOF'
+export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
+EOF
+
+# Install a tested CUDA 12.4 PyTorch stack
 python -m pip install --force-reinstall --no-deps \
   torch torchvision torchaudio \
   --index-url https://download.pytorch.org/whl/cu124
@@ -42,7 +49,7 @@ python -c "import torch; print(torch.__version__, torch.version.cuda); print('CU
 # CUDA available: True
 ```
 
-This keeps `environment_platform.yml` portable across architectures, while the post-step installs a matching GPU-capable PyTorch build on VISTA aarch64.
+This keeps `environment_platform.yml` portable across architectures, while the post-step installs a matching GPU-capable PyTorch build on VISTA aarch64 and ensures the environment's C++ runtime is consistently used.
 
 ### Install `neuraloperator` (spectral_fix branch)
 

@@ -9,6 +9,16 @@
 #     --index-url https://download.pytorch.org/whl/cu124
 # as documented in the README. On x86_64 with NVIDIA GPUs (e.g., RTX 4090),
 # you can alternatively use `environment.yml` for a more tightly pinned setup.
+#
+# SciPy and libstdcxx-ng are pinned to avoid GLIBCXX_* missing on aarch64
+# (system libstdc++ is older; conda's SciPy wheels can be built with newer GCC).
+# For the lightest workflow on VISTA, after creating and activating this env run
+# the following ONCE to ensure the env's C++ runtime is always used:
+#   mkdir -p "$CONDA_PREFIX/etc/conda/activate.d"
+#   cat >> "$CONDA_PREFIX/etc/conda/activate.d/edm_no_libstdcxx.sh" << 'EOF'
+#   export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
+#   EOF
+# Then every `conda activate edm_no` will have the correct LD_LIBRARY_PATH.
 name: edm_no
 channels:
   - pytorch
@@ -18,8 +28,10 @@ dependencies:
   - python=3.10
   - pytorch=2.7.1
   - numpy
-  - scipy
+  - scipy==1.11.4  # pinned for reproducible SciPy/libstdc++ combo across machines
+  - libstdcxx-ng  # ensure conda C++ runtime is used; match to conda-built scipy
   - pillow
+  - psutil
   - numcodecs  # from conda-forge (pre-built); avoids building with nvc on aarch64
   - pip
   - pip:
