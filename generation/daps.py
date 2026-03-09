@@ -375,6 +375,10 @@ class PDESolverDAPS(PDESolver):
         self.surrogate.eval()
         self.surrogate.requires_grad_(False)  # freeze weights; gradients still flow to inputs
 
+        # Print network parameters
+        n_params = sum(p.numel() for p in self.surrogate.parameters())
+        print(f"Loaded surrogate network with {n_params} parameters.")
+
     def load_data(self):
         super().load_data()
         self.normalizer = self.dataset.create_normalizer()
