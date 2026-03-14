@@ -69,6 +69,10 @@ class PDESolver:
         if self.net.img_resolution != self.resolution:
             print(f"Warning: Network resolution {self.net.img_resolution} does not match data resolution {self.resolution}.")
 
+        # Print network parameters
+        n_params = sum(p.numel() for p in self.net.parameters())
+        print(f"Loaded network with {n_params} parameters.")
+
     def generate_latents(self):
         if self.config["init_latents"] == "white_noise":
             return torch.randn([self.batch_size, self.n_channels, self.resolution, self.resolution], device=self.device)
@@ -106,9 +110,11 @@ class PDESolver:
             metrics = self.calculate_metrics(pred, gt)
 
             self.update_stats(metrics)
-            if i == 0:
-                print("Metrics for first batch:")
-                self.finalize_stats(save_dir=None)
+            # if i == 0:
+            #     print("Metrics for first batch:")
+            #     self.finalize_stats(save_dir=None)
+            print(f"Completed batch {i+1}/{len(self.dataloader)}")
+            self.finalize_stats(save_dir=None)
 
             self.save_results(pred, f"{self.save_dir}/results/batch_{i}.npy")
             self.plot_results(pred, gt, metrics, self.save_dir)

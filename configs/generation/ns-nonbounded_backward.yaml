@@ -11,7 +11,7 @@ max_size: 12  # maximum number of samples to use, defaults to one epoch
 batch_size: 12  # full batch = 1000
 
 # Model options
-pkl_path: '__required__'
+pkl_path: 'generation/thomas/NS_Multi_one_channel/network-snapshot-10000008-new.pkl'
 rbf_scale: 0.05
 
 # Generation options
@@ -45,7 +45,7 @@ observation:
 #   upsampling_mode: "bilinear"
 guidance:
   type: "daps"
-  surrogate_type: "fno_pad" # fno, fno_pad, fno_pad_mix, uno
+  surrogate_type: "fno_pad_scarce" # fno, fno_pad, fno_pad_mix, uno
   # Super-resolution guidance
   sigma_min_1: 0.005
   sigma_max_2: 5
