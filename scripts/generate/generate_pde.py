@@ -1,6 +1,13 @@
 import json
 import os
+import sys
 from datetime import datetime
+
+# Repo root must be on path when running as `python scripts/generate/generate_pde.py`
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_ROOT = os.path.abspath(os.path.join(_SCRIPT_DIR, "..", ".."))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
 
 import numpy as np
 import torch
