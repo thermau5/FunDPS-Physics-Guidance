@@ -70,11 +70,11 @@ class FullObservation(Observation):
     def get_observation_loss(self, x_pred):
         if self.to_normalize:
             x_pred = self.normalizer.normalize(x_pred)
-        
+
         # Handle multi-resolution: interpolate x_pred to match ground truth resolution
-        if hasattr(self, 'interpolation_mode') and self.interpolation_mode is not None and x_pred.shape[-1] != self.resolution:
+        if hasattr(self, "interpolation_mode") and self.interpolation_mode is not None and x_pred.shape[-1] != self.resolution:
             x_pred = torch.nn.functional.interpolate(x_pred, size=(self.resolution, self.resolution), mode=self.interpolation_mode, align_corners=True)
-        
+
         return self._calculate_loss(x_pred, self.ground_truth, self.known_indices)
 
 
@@ -132,11 +132,11 @@ class SparseObservation(Observation):
     def get_observation_loss(self, x_pred):
         if self.to_normalize:
             x_pred = self.normalizer.normalize(x_pred)
-        
+
         # Handle multi-resolution: interpolate x_pred to match ground truth resolution
-        if hasattr(self, 'interpolation_mode') and self.interpolation_mode is not None and x_pred.shape[-1] != self.resolution:
+        if hasattr(self, "interpolation_mode") and self.interpolation_mode is not None and x_pred.shape[-1] != self.resolution:
             x_pred = torch.nn.functional.interpolate(x_pred, size=(self.resolution, self.resolution), mode=self.interpolation_mode, align_corners=True)
-        
+
         return self._calculate_loss(x_pred, self.ground_truth, self.known_indices, self.masks)
 
 
@@ -167,9 +167,9 @@ class PDEObservation(Observation):
         Returns:
             torch.Tensor: PDE loss
         """
-        
+
         # Handle multi-resolution: interpolate x_pred to match ground truth resolution
-        if hasattr(self, 'interpolation_mode') and self.interpolation_mode is not None and x_pred.shape[-1] != self.resolution:
+        if hasattr(self, "interpolation_mode") and self.interpolation_mode is not None and x_pred.shape[-1] != self.resolution:
             x_pred = torch.nn.functional.interpolate(x_pred, size=(self.resolution, self.resolution), mode=self.interpolation_mode, align_corners=True)
 
         pde_residual = self.pde_residual_func(x_pred)
@@ -182,8 +182,8 @@ class PDEObservation(Observation):
         return loss
 
 
+from neuralop.models.fno_legacy import FNO  # ≈ the same import you used in training
 
-from neuralop.models.fno import FNO            # ≈ the same import you used in training
 
 class FNOObservation(Observation):
     """
@@ -200,13 +200,7 @@ class FNOObservation(Observation):
         super().__init__(config, dataset_name)
 
         # (1) instantiate the architecture used during training
-        self.fno = FNO(
-            n_modes=(64, 64),
-            in_channels=1,
-            out_channels=1,
-            hidden_channels=64,
-            n_layers=4
-        ) # adjust parameters to match the training setup
+        self.fno = FNO(n_modes=(64, 64), in_channels=1, out_channels=1, hidden_channels=64, n_layers=4)  # adjust parameters to match the training setup
 
         # (2) load the learned weights
         task = config.get("task", "forward").lower()
@@ -230,15 +224,14 @@ class FNOObservation(Observation):
     # init(): gather tensor meta-data                                 #
     # --------------------------------------------------------------- #
     def init(self, ground_truth, normalizer=None):
-        self.device      = ground_truth.device
-        self.resolution  = ground_truth.shape[-1]
+        self.device = ground_truth.device
+        self.resolution = ground_truth.shape[-1]
         self.n_channels = 1  # Only one loss term is produced (for solution)
 
         self.fno.to(self.device)
 
         # all spatial points contribute to the loss
-        self.known_indices = torch.tensor([[self.resolution**2]],
-                                          device=self.device)
+        self.known_indices = torch.tensor([[self.resolution**2]], device=self.device)
 
         self.to_normalize = self.config["normalize"]
         if self.to_normalize:
@@ -252,20 +245,16 @@ class FNOObservation(Observation):
             x_pred = self.normalizer.normalize(x_pred)
 
         # Handle multi-resolution: interpolate x_pred to match ground truth resolution
-        if hasattr(self, 'interpolation_mode') and self.interpolation_mode is not None and x_pred.shape[-1] != self.resolution:
+        if hasattr(self, "interpolation_mode") and self.interpolation_mode is not None and x_pred.shape[-1] != self.resolution:
             x_pred = torch.nn.functional.interpolate(x_pred, size=(self.resolution, self.resolution), mode=self.interpolation_mode, align_corners=True)
 
-        params     = x_pred[:, 0:1].float()
+        params = x_pred[:, 0:1].float()
         sol_target = x_pred[:, 1:2].float()
 
-        with torch.no_grad():                       # deterministic FNO call
+        with torch.no_grad():  # deterministic FNO call
             sol_from_fno = self.fno(params).float()
 
-        return self._calculate_loss(pred=sol_from_fno,
-                                    gt=sol_target,
-                                    n_obs=self.known_indices)
-
-
+        return self._calculate_loss(pred=sol_from_fno, gt=sol_target, n_obs=self.known_indices)
 
 
 def get_observation_class(config, dataset_name):

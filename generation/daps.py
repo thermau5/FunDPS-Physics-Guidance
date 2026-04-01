@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from tqdm import tqdm
-import os # Added for auto-detection
+import os  # Added for auto-detection
 
 from training.dataset_utils import DatasetNormalizer
 
@@ -16,116 +16,120 @@ from training.networks import SongUNO  # For UNO surrogate
 try:
     import sys
     import os
+
     # Add parent directory to path to import poisson_numerical_solver
     parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     if parent_dir not in sys.path:
         sys.path.insert(0, parent_dir)
     from poisson_numerical_solver import forward_poisson
+
     HAS_NUMERICAL_POISSON = True
 except ImportError as e:
     print(f"Warning: Could not import numerical Poisson solver: {e}")
     HAS_NUMERICAL_POISSON = False
 
+
 # Custom FNO_pad class to match training architecture
 class FNO_pad(FNO):
     def forward(self, x):
         res_2 = x.shape[-1] // 2
-        x = F.pad(x, (res_2, res_2, res_2, res_2), mode='reflect')
+        x = F.pad(x, (res_2, res_2, res_2, res_2), mode="reflect")
         ret = super().forward(x)
         ret = ret[:, :, res_2:-res_2, res_2:-res_2]
         return ret
+
 
 # Wrapper class to make SongUNO compatible with direct forward prediction
 class SongUNOWrapper(torch.nn.Module):
     def __init__(self, *args, **kwargs):
         super().__init__()
         self.model = SongUNO(*args, **kwargs)
-        
+
     def forward(self, x):
         # Create dummy noise_labels and class_labels for training
         batch_size = x.shape[0]
         device = x.device
-        
+
         # Create dummy noise_labels (timestep 0 for deterministic prediction)
         noise_labels = torch.zeros(batch_size, device=device)
-        
+
         # Create dummy class_labels (unconditional)
         class_labels = torch.zeros(batch_size, 0, device=device)  # Empty class labels
-        
-        return self.model(x, noise_labels, None)
 
+        return self.model(x, noise_labels, None)
 
 # Wrapper class for numerical Poisson solver (GPU-accelerated)
 class NumericalPoissonWrapper(torch.nn.Module):
     """GPU-accelerated wrapper for numerical Poisson solver using PyTorch.
-    
+
     Takes input tensor [B, 1, H, W] (source term f) and returns [B, 1, H, W] (solution φ).
     Supports gradients through torch.linalg.solve, allowing backpropagation w.r.t. inputs.
     Parallel to FNO/FNO_pad in terms of forward operator usage and gradient flow.
     """
+
     def __init__(self):
         super().__init__()
         # Cache sparse and dense matrices for different grid sizes (lazy initialization)
         self._sparse_matrix_cache = {}
         self._dense_matrix_cache = {}
-    
+
     def _build_poisson_matrix(self, S, device, dtype):
         """Build the sparse Poisson matrix A for grid size S on the given device.
-        
+
         The matrix represents: A @ phi_vec = f_vec where Δφ = f
         """
         cache_key = (S, device, dtype)
         if cache_key in self._sparse_matrix_cache:
             return self._sparse_matrix_cache[cache_key]
-        
+
         h = 1.0 / (S - 1)
         N = S * S
-        
+
         # Build indices and values for sparse matrix
         indices = []
         values = []
-        
+
         for i in range(S):
             for j in range(S):
                 k = i * S + j  # linear index
-                
+
                 # Dirichlet boundary: φ = 0
                 if i == 0 or i == S - 1 or j == 0 or j == S - 1:
                     indices.append([k, k])
                     values.append(1.0)
                 else:
                     # Interior points: 5-point stencil
-                    indices.append([k, k])          # center
+                    indices.append([k, k])  # center
                     values.append(-4.0 / h**2)
-                    
-                    indices.append([k, k - 1])      # left (i, j-1)
+
+                    indices.append([k, k - 1])  # left (i, j-1)
                     values.append(1.0 / h**2)
-                    
-                    indices.append([k, k + 1])      # right (i, j+1)
+
+                    indices.append([k, k + 1])  # right (i, j+1)
                     values.append(1.0 / h**2)
-                    
-                    indices.append([k, k - S])      # down (i-1, j)
+
+                    indices.append([k, k - S])  # down (i-1, j)
                     values.append(1.0 / h**2)
-                    
-                    indices.append([k, k + S])      # up (i+1, j)
+
+                    indices.append([k, k + S])  # up (i+1, j)
                     values.append(1.0 / h**2)
-        
+
         # Convert to tensors
         indices_tensor = torch.tensor(indices, dtype=torch.long, device=device).t()
         values_tensor = torch.tensor(values, dtype=dtype, device=device)
-        
+
         # Create sparse matrix in COO format, then convert to CSR for efficient solving
         A_sparse = torch.sparse_coo_tensor(indices_tensor, values_tensor, (N, N))
         A_sparse = A_sparse.coalesce()  # Sort indices and sum duplicates
-        
+
         # Cache the sparse matrix
         self._sparse_matrix_cache[cache_key] = A_sparse
-        
+
         return A_sparse
-    
+
     def _get_dense_matrix(self, S, device, dtype):
         """Get dense version of Poisson matrix (cached).
-        
+
         Note: The matrix itself is built from constant values (no gradients needed),
         but gradients will flow through torch.linalg.solve w.r.t. the input tensor.
         This is parallel to how FNO/FNO_pad work: fixed weights, gradients flow through inputs.
@@ -133,44 +137,45 @@ class NumericalPoissonWrapper(torch.nn.Module):
         cache_key = (S, device, dtype)
         if cache_key in self._dense_matrix_cache:
             return self._dense_matrix_cache[cache_key]
-        
+
         # Get sparse matrix and convert to dense
         A_sparse = self._build_poisson_matrix(S, device, dtype)
         A_dense = A_sparse.to_dense()
         A_dense.requires_grad_(False)
-        
+
+
         # Matrix is built from constants, so naturally doesn't require gradients
         # torch.linalg.solve will still compute gradients w.r.t. the right-hand side (input)
-        
+
         # Cache the dense matrix
         self._dense_matrix_cache[cache_key] = A_dense
-        
+
         return A_dense
-    
+
     def forward(self, x):
         """
         Args:
             x: Tensor of shape [B, 1, H, W] where B is batch size, H=W is resolution
                Represents the source term f(x,y)
-        
+
         Returns:
             Tensor of shape [B, 1, H, W] representing the solution φ(x,y) = Δ^(-1) f
         """
         if x.dim() != 4 or x.shape[1] != 1:
             raise ValueError(f"Expected input shape [B, 1, H, W], got {x.shape}")
-        
+
         batch_size, channels, height, width = x.shape
         if height != width:
             raise ValueError(f"Expected square grid, got {height}x{width}")
-        
+
         S = height
         device = x.device
         dtype = x.dtype
-        
+
         # Get cached dense matrix for efficient batched solving
         # For large grids, this uses more memory but allows batched GPU operations
         A_dense = self._get_dense_matrix(S, device, dtype)  # [N, N]
-        
+
         # Reshape input: [B, 1, H, W] -> [B, H*W]
         f_vec = x.view(batch_size, -1).clone()  # [B, N]
         # Enforce homogeneous Dirichlet BC consistently in RHS.
@@ -183,25 +188,25 @@ class NumericalPoissonWrapper(torch.nn.Module):
         boundary_mask[:, -1] = True
         x_bc = x_bc.masked_fill(boundary_mask.unsqueeze(0), 0.0)
         f_vec = x_bc.view(batch_size, -1)
-        
+
+
         # Batch solve: A_dense @ phi_vec = f_vec
         # A_dense: [N, N], f_vec: [B, N] -> phi_vec: [B, N]
         # Transpose f_vec to [N, B], solve, then transpose back
         f_vec_t = f_vec.t()  # [N, B]
         phi_vec_t = torch.linalg.solve(A_dense, f_vec_t)  # [N, B]
         phi_vec = phi_vec_t.t()  # [B, N]
-        
+
         # Reshape: [B, N] -> [B, 1, H, W]
         phi = phi_vec.view(batch_size, 1, height, width)
-        
+
         return phi
 
 
-def compute_dynamic_langevin_steps(annealing_step, total_annealing_steps, base_langevin_steps, 
-                                  decay_type="exponential", decay_rate=0.5, min_steps=1):
+def compute_dynamic_langevin_steps(annealing_step, total_annealing_steps, base_langevin_steps, decay_type="exponential", decay_rate=0.5, min_steps=1):
     """
     Compute the number of Langevin steps dynamically based on the annealing step.
-    
+
     Args:
         annealing_step (int): Current annealing step (0-indexed)
         total_annealing_steps (int): Total number of annealing steps
@@ -209,19 +214,19 @@ def compute_dynamic_langevin_steps(annealing_step, total_annealing_steps, base_l
         decay_type (str): Type of decay function ("exponential", "linear", "polynomial", "step", "sigmoid", "increasing")
         decay_rate (float): Decay rate parameter (0-1) or increase multiplier for "increasing"
         min_steps (int): Minimum number of Langevin steps
-    
+
     Returns:
         int: Number of Langevin steps for the current annealing step
     """
     if annealing_step >= total_annealing_steps:
         return min_steps
-    
+
     # Normalize step to [0, 1]
     step_ratio = annealing_step / total_annealing_steps
-    
+
     if decay_type == "exponential":
         # Exponential decay: steps = base_steps * (decay_rate ^ step_ratio)
-        steps = int(base_langevin_steps * (decay_rate ** step_ratio))
+        steps = int(base_langevin_steps * (decay_rate**step_ratio))
     elif decay_type == "linear":
         # Linear decay: steps = base_steps * (1 - step_ratio * (1 - decay_rate))
         steps = int(base_langevin_steps * (1 - step_ratio * (1 - decay_rate)))
@@ -255,17 +260,15 @@ def compute_dynamic_langevin_steps(annealing_step, total_annealing_steps, base_l
             steps = int(base_langevin_steps * 0.2)
     else:
         raise ValueError(f"Unknown decay_type: {decay_type}")
-    
+
     # print(f"Langevin steps: {steps}")
     return max(steps, min_steps)
 
 
-def compute_dynamic_learning_rate(annealing_step, total_annealing_steps, base_lr, 
-                                 lr_schedule="warmup_decay", lr_decay_rate=0.3, 
-                                 lr_min_ratio=0.01, lr_warmup_steps=10):
+def compute_dynamic_learning_rate(annealing_step, total_annealing_steps, base_lr, lr_schedule="warmup_decay", lr_decay_rate=0.3, lr_min_ratio=0.01, lr_warmup_steps=10):
     """
     Compute the learning rate dynamically based on the annealing step.
-    
+
     Args:
         annealing_step (int): Current annealing step (0-indexed)
         total_annealing_steps (int): Total number of annealing steps
@@ -274,19 +277,19 @@ def compute_dynamic_learning_rate(annealing_step, total_annealing_steps, base_lr
         lr_decay_rate (float): Learning rate decay rate (0-1)
         lr_min_ratio (float): Minimum learning rate ratio relative to base_lr
         lr_warmup_steps (int): Number of warmup steps (learning rate increases then decreases)
-    
+
     Returns:
         float: Learning rate for the current annealing step
     """
     if annealing_step >= total_annealing_steps:
         return base_lr * lr_min_ratio
-    
+
     # Normalize step to [0, 1]
     step_ratio = annealing_step / total_annealing_steps
-    
+
     if lr_schedule == "exponential":
         # Exponential decay: lr = base_lr * (lr_decay_rate ^ step_ratio)
-        lr = base_lr * (lr_decay_rate ** step_ratio)
+        lr = base_lr * (lr_decay_rate**step_ratio)
     elif lr_schedule == "linear":
         # Linear decay: lr = base_lr * (1 - step_ratio * (1 - lr_decay_rate))
         lr = base_lr * (1 - step_ratio * (1 - lr_decay_rate))
@@ -315,7 +318,7 @@ def compute_dynamic_learning_rate(annealing_step, total_annealing_steps, base_lr
             lr = base_lr * (1 - decay_ratio * (1 - lr_decay_rate))
     else:
         raise ValueError(f"Unknown lr_schedule: {lr_schedule}")
-    
+
     # Ensure learning rate doesn't go below minimum
     print(f"Learning rate: {lr}")
     return max(lr, base_lr * lr_min_ratio)
@@ -396,9 +399,9 @@ class Scheduler(nn.Module):
 
 class PDESolverDAPS(PDESolver):
     """PDESolver implementation using Decoupled Annealing Posterior Sampling (DAPS).
-    
+
     This implementation is now adaptable to FNO, FNO_pad, SongUNO, and numerical Poisson solver.
-    
+
     Configuration options:
         - surrogate_type (str): Type of surrogate model to use. Options:
             - "auto" (default): Automatically detects the best available model
@@ -408,13 +411,13 @@ class PDESolverDAPS(PDESolver):
             - "pino": Uses PINO surrogate model
             - "numerical_poisson": Uses numerical Poisson solver (no training required, for Poisson dataset only)
         - dataset (str): Dataset name for loading the appropriate trained surrogate model
-        
+
     Auto-detection priority (when surrogate_type="auto"):
         1. SongUNO (artifacts/models/legacy/uno_trained_forward_{dataset}.pth)
         2. FNO_pad (artifacts/models/legacy/fno_pad_trained_forward_{dataset}.pth)
         3. FNO (artifacts/models/legacy/fno_trained_forward_{dataset}.pth)
         4. Numerical Poisson (if dataset="poisson" and solver available)
-        
+
     Example config:
         config = {
             "surrogate_type": "numerical_poisson",  # Use numerical Poisson solver
@@ -495,13 +498,13 @@ class PDESolverDAPS(PDESolver):
             elif f"pino_trained_forward_{config['dataset']}.pth" in generation_files:
                 surrogate_type = "pino"
                 print("Auto-detected PINO surrogate model")
-            elif HAS_NUMERICAL_POISSON and config.get('dataset', '').lower() == 'poisson':
+            elif HAS_NUMERICAL_POISSON and config.get("dataset", "").lower() == "poisson":
                 surrogate_type = "numerical_poisson"
                 print("Auto-detected numerical Poisson solver for Poisson dataset")
             else:
                 surrogate_type = "fno"  # Default fallback
                 print("No specific model found, defaulting to FNO")
-        
+
         # Surrogate architecture: read from config['surrogate_config'] with per-type defaults.
         surr_cfg_raw = config.get("surrogate_config", None)
         if surr_cfg_raw is not None and hasattr(surr_cfg_raw, "to_dict"):
@@ -550,10 +553,7 @@ class PDESolverDAPS(PDESolver):
             default_model_path = f"artifacts/models/legacy/pino_trained_forward_{config['dataset']}.pth"
         elif surrogate_type.lower() == "numerical_poisson":
             if not HAS_NUMERICAL_POISSON:
-                raise ImportError(
-                    "Numerical Poisson solver requested but not available. "
-                    "Ensure poisson_numerical_solver.py is accessible and scipy is installed."
-                )
+                raise ImportError("Numerical Poisson solver requested but not available. " "Ensure poisson_numerical_solver.py is accessible and scipy is installed.")
             print("Using numerical Poisson solver (no model weights needed)")
             self.surrogate = NumericalPoissonWrapper()
             model_path = None  # No model file needed
@@ -570,7 +570,7 @@ class PDESolverDAPS(PDESolver):
             model_path = surrogate_path or default_model_path
         else:
             model_path = None
-        
+
         # Load trained forward surrogate (skip for numerical solver or when no path is provided)
         if model_path is not None:
             print(f"Using surrogate path: {model_path}")
@@ -593,7 +593,6 @@ class PDESolverDAPS(PDESolver):
                 state_dict = loaded
                 print("Checkpoint format: state dict.")
             self.surrogate.load_state_dict(state_dict)
-        
         self.surrogate.to(self.device)
         self.surrogate.eval()
         self.surrogate.requires_grad_(False)  # freeze weights; gradients still flow to inputs
@@ -656,7 +655,7 @@ class PDESolverDAPS(PDESolver):
                 denorm_x0y = self.normalizer.denormalize(x0y, channel=channel)
                 denorm_xt = self.normalizer.denormalize(xt, channel=channel)
                 intermediates.append(torch.cat([denorm_x0, denorm_x0y, denorm_xt], dim=1))
-                
+
                 if intermediates_channel_index is None:
                     C1 = denorm_x0.shape[1]
                     C2 = denorm_x0y.shape[1]
@@ -736,11 +735,7 @@ class PDESolverDAPS(PDESolver):
         # Calculate learning rate with dynamic control
         if self.dynamic_lr:
             # Use dynamic learning rate control
-            current_lr = compute_dynamic_learning_rate(
-                annealing_step, self.num_steps, self.lr,
-                self.lr_schedule, self.lr_decay_rate, 
-                self.lr_min_ratio, self.lr_warmup_steps
-            )
+            current_lr = compute_dynamic_learning_rate(annealing_step, self.num_steps, self.lr, self.lr_schedule, self.lr_decay_rate, self.lr_min_ratio, self.lr_warmup_steps)
         else:
             # Use original adaptive learning rate
             multiplier = (1 ** (1 / rho) + ratio * (self.lr_min_ratio ** (1 / rho) - 1 ** (1 / rho))) ** rho
@@ -748,10 +743,7 @@ class PDESolverDAPS(PDESolver):
 
         # Dynamic Langevin step control
         if self.dynamic_langevin:
-            current_langevin_steps = compute_dynamic_langevin_steps(
-                annealing_step, self.num_steps, self.langevin_steps,
-                self.langevin_decay_type, self.langevin_decay_rate, self.langevin_min_steps
-            )
+            current_langevin_steps = compute_dynamic_langevin_steps(annealing_step, self.num_steps, self.langevin_steps, self.langevin_decay_type, self.langevin_decay_rate, self.langevin_min_steps)
         else:
             current_langevin_steps = self.langevin_steps
 

@@ -7,6 +7,8 @@ debug.*
 temp.*
 *.png
 archive/
+*.pdf
+figs/main-table-12batches-groups124/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
