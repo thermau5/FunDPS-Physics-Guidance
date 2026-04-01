@@ -6,6 +6,7 @@ exps
 debug.*
 temp.*
 *.png
+archive/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -170,9 +171,6 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 data/
-generation/*.pth
-miniconda.sh
-generation/*.pth
 miniconda.sh
 Miniconda3-latest-Linux-x86_64.sh
 neuraloperator/
@@ -182,4 +180,20 @@ ics-dev-v2
 # Data and visualization files
 *.mat
 *.gif
-model/diffusion/poisson/network-snapshot-10016064.pkl
+
+# Runtime artifacts and experiment outputs.
+exps/
+wandb/
+logs/
+visualization/logs/
+visualization/outputs/
+
+# Model/checkpoint artifacts (keep curated models via negative patterns below).
+*.pth
+*.pkl
+
+# Curated exceptions (opt-in tracked artifacts).
+!artifacts/
+!artifacts/models/
+!artifacts/models/curated/
+!artifacts/models/curated/**
