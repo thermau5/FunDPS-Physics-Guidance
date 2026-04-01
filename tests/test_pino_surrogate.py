@@ -5,7 +5,7 @@ Equivalent to test_fno_surrogate.py but adapted for 3D PINO model.
 
 Usage:
     python test_pino_surrogate.py \
-        --model-path generation/pino_trained_forward_ns-temp0main_256.pth \
+        --model-path artifacts/models/legacy/pino_trained_forward_ns-temp0main_256.pth \
         --data-path data/DiffPDE/ns-temp0main_test_hf \
         --output-dir pino_predictions \
         --save-examples 10
@@ -25,7 +25,7 @@ from training.dataset_utils import DatasetNormalizer
 
 # Add path for positional encoding
 script_dir = os.path.dirname(os.path.abspath(__file__))
-temp_scripts_path = os.path.join(script_dir, 'temp_0-main', 'scripts')
+temp_scripts_path = os.path.join(script_dir, '..', 'archive', 'temp_0-main', 'scripts')
 sys.path.insert(0, temp_scripts_path)
 from data0.positional_encoding import get_grid_positional_encoding
 import math
@@ -88,7 +88,7 @@ parser.add_argument(
     "--save-examples", "-s", type=int, default=10,
     help="Number of prediction examples to save as images")
 # Compute default config path dynamically
-default_config_path = os.path.join(script_dir, 'temp_0-main', 'config', 'ns1w_plot0.yaml')
+default_config_path = os.path.join(script_dir, '..', 'archive', 'temp_0-main', 'config', 'ns1w_plot0.yaml')
 parser.add_argument(
     "--config-path", "-c", default=default_config_path,
     help="Path to PINO config file")
