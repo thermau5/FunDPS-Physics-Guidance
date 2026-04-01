@@ -1,3 +1,11 @@
+import os
+import sys
+
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_ROOT = os.path.abspath(os.path.join(_SCRIPT_DIR, "..", ".."))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
 from matplotlib.colors import Normalize, PowerNorm
 from matplotlib.ticker import ScalarFormatter
 import numpy as np
