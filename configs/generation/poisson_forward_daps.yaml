@@ -1,0 +1,77 @@
+outdir: 'exps'
+name: ''
+
+# Dataset options
+task: 'forward'  # forward, inverse, or forward_inverse
+dataset: 'poisson'
+data_path: 'data/DiffPDE/poisson_test_hf'
+data_offset: null
+resolution: 128  # downsampled resolution, defaults to dataset resolution
+max_size: null  # maximum number of samples to use, defaults to one epoch
+batch_size: 160
+
+# Model options
+pkl_path: model/diffusion/poisson/network-snapshot-10016064.pkl
+rbf_scale: 0.05
+
+# Forward surrogate (only used at the end to produce solution channel)
+surrogate_path: model/no_surrogate/fno_pad/forward_poisson/128/500/fno_trained_500_oa5hfuiw.pth
+surrogate_config:
+  n_modes: [64, 64]
+  in_channels: 1
+  out_channels: 1
+  hidden_channels: 64
+  n_layers: 4
+
+# Generation options
+seed: 1999870123
+init_latents: "rbf"  # rbf or white_noise
+iterations: 500
+sigma_min: 0.002
+sigma_max: 80
+rho: 7
+
+# Loss options
+# Observe ONLY channel 0 (coefficient/source); channel 1 is unobserved during sampling.
+observation:
+  - type: "sparse"
+    loss_type: "l1"  # mse, l1, l2, huber, or sobolev_h1
+    known_indices: [500, 0]
+    normalize: true
+
+# Guidance options
+guidance:
+  type: "daps"
+  surrogate_type: "fno_pad" # fno, fno_pad, fno_pad_mix, uno, numerical_poisson
+  # Super-resolution guidance (optional; mirrors poisson_backward defaults)
+  sigma_min_1: 0.005
+  sigma_max_2: 5
+  init_resolution: 64
+  upsampling_mode: "bilinear"
+  upsampling_step: 50
+  annealing:
+    num_steps: 30
+    sigma_max: 10
+    sigma_min: 0.01
+    sigma_final: 0
+    rho: 7
+  diffusion:
+    num_steps: 50
+    sigma_min: 0.001
+    sigma_final: 0
+    rho: 7
+  langevin:
+    num_steps: 5
+    lr: 1.0e-4
+    lr_min_ratio: 0.01
+    lr_rho: 1
+    eta: 0.1
+    tau: 0.001
+    # Only channel-0 (coefficient) guidance weight is non-zero.
+    weights: [20, 0]
+
+# I/O-related
+n_plots: 4  # number of samples to plot
+n_process_steps: 10  # number of steps to plot process
+plot_spectral_energy: true
+wandb: "offline"
