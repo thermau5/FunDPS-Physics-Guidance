@@ -1,0 +1,92 @@
+# visualization:
+#   pdes:
+#     - name: poisson
+#       generation_config: configs/generation/poisson_backward.yaml
+#       checkpoint_dir: exps/no_surrogate/fno_pad/0310_173643-fno_poisson_forward_bs40_ep1000_m64_p35M-ucykqi42
+#     - name: helmholtz
+#       generation_config: configs/generation/helmholtz_backward.yaml
+#       checkpoint_dir: exps/no_surrogate/fno_pad/0310_173644-fno_helmholtz_forward_bs40_ep1000_m64_p35M-ij336nmf
+#     - name: ns-nonbounded
+#       generation_config: configs/generation/ns-nonbounded_backward.yaml
+#       checkpoint_dir: exps/no_surrogate/fno_pad/0310_173643-fno_ns-nonbounded_forward_bs40_ep1000_m64_p35M-qdwh3y7f
+#   epochs:
+#     - 0
+#     - 100
+#     - 200
+#     - 300
+#     - 400
+#     - 500
+#     - 600
+#     - 700
+#     - 800
+visualization:
+  # New sweep runs write under this directory (relative to repo root). Keeps `exps/` tidy.
+  # `aggregate_sweep_results.py` scans both `exps/` (legacy) and this folder.
+  sweep_exps_outdir: exps/surrogate_sweep
+  # One subfolder per sweep batch (matches the G{MMDD}_… style from generate_pde names).
+  # `auto` -> G{MMDD}_{SLURM_ARRAY_JOB_ID} so each sbatch array lands together; override e.g. "G0320_studyA".
+  sweep_session_subdir: auto
+  # Optional: also nest by PDE under the session folder (default off).
+  sweep_group_by_pde: false
+  pdes:
+    - name: poisson
+      generation_config: configs/generation/poisson_backward.yaml
+      checkpoint_dir: exps/no_surrogate/fno_pad/0318_113747-fno_poisson_forward_bs40_ep500_m64_p35M-oa5hfuiw
+    - name: helmholtz
+      generation_config: configs/generation/helmholtz_backward.yaml
+      checkpoint_dir: exps/no_surrogate/fno_pad/0318_113747-fno_helmholtz_forward_bs40_ep500_m64_p35M-elhusgf4
+    - name: ns-nonbounded
+      generation_config: configs/generation/ns-nonbounded_backward.yaml
+      checkpoint_dir: exps/no_surrogate/fno_pad/0318_113749-fno_ns-nonbounded_forward_bs40_ep500_m64_p35M-hcugvf91
+  epochs:
+    - 0
+    - 10
+    - 20
+    - 30
+    - 40
+    - 50
+    - 60
+    - 70
+    - 80
+    - 90
+    - 100
+    - 110
+    - 120
+    - 130
+    - 140
+    - 150
+    - 160
+    - 170
+    - 180
+    - 190
+    - 200
+    - 210
+    - 220
+    - 230
+    - 240
+    - 250
+    - 260
+    - 270
+    - 280
+    - 290
+    - 300
+    - 310
+    - 320
+    - 330
+    - 340
+    - 350
+    - 360
+    - 370
+    - 380
+    - 390
+    - 400
+    - 410
+    - 420
+    - 430
+    - 440
+    - 450
+    - 460
+    - 470
+    - 480
+    - 490
+    - 500
