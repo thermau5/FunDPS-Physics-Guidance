@@ -7,12 +7,26 @@ dataset: 'poisson'
 data_path: 'data/DiffPDE/poisson_test_hf'
 data_offset: null
 resolution: 128  # downsampled resolution, defaults to dataset resolution
-max_size: 12  # maximum number of samples to use, defaults to one epoch
-batch_size: 12  # full batch = 1000
+max_size: null  # maximum number of samples to use, defaults to one epoch
+batch_size: 160  # full batch = 1000
 
 # Model options
-pkl_path: '__required__'
+pkl_path: model/diffusion/poisson/network-snapshot-10016064.pkl
 rbf_scale: 0.05
+# Path to surrogate forward model (.pth) or training checkpoint (with model_state). Optional if using default paths.
+surrogate_path: model/no_surrogate/fno_pad/forward_poisson/128/500/fno_trained_500_oa5hfuiw.pth
+# Surrogate architecture (optional). If omitted, current per-type defaults are used.
+surrogate_config:
+  n_modes: [64, 64]
+  in_channels: 1
+  out_channels: 1
+  hidden_channels: 64
+  n_layers: 4
+# Examples of surrogate models (choose ONE and update surrogate_path accordingly):
+# surrogate_path: 'artifacts/models/legacy/fno_pad_trained_forward_poisson_128_500.pth'           # FNO with padding surrogate trained on full Poisson dataset
+# surrogate_path: 'artifacts/models/legacy/fno_pad_trained_forward_poisson_128_400_scarce500.pth' # FNO_pad surrogate trained on scarce Poisson data
+# surrogate_path: 'artifacts/models/legacy/fno_trained_forward_poisson.pth'                       # Standard FNO surrogate for Poisson
+# surrogate_path: 'artifacts/models/legacy/uno_trained_forward_poisson.pth'                       # UNO surrogate (U-Net-like transformer) for Poisson
 
 # Generation options
 seed: 1999870123 # 1925618564 #1568312476
@@ -40,12 +54,12 @@ observation:
 #   type: "dps"
 #   surrogate_type: "fno_pad" # fno, fno_pad, fno_pad_mix, uno
 #   weights: [0, 10000] # Default guidance = 10000
-  # # Super-resolution guidance
-  # sigma_min_1: 0.005
-  # sigma_max_2: 5
-  # init_resolution: 64
-  # upsampling_mode: "bilinear"
-  # upsampling_step: 200
+#   # Super-resolution guidance
+#   sigma_min_1: 0.005
+#   sigma_max_2: 5
+#   init_resolution: 64
+#   upsampling_mode: "bilinear"
+#   upsampling_step: 200
 guidance:
   type: "daps"
   surrogate_type: "fno_pad" # fno, fno_pad, fno_pad_mix, uno, numerical_poisson
@@ -86,29 +100,6 @@ guidance:
     lr_schedule: "sigmoid"  # Options: "exponential", "linear", "polynomial", "cosine", "sigmoid", "warmup_decay"
     lr_decay_rate: 0.5  # Learning rate decay rate (0-1), lower values = faster decay
     lr_warmup_steps: 0  # Number of warmup steps (learning rate increases then decreases)
-# guidance:
-#   type: "daps_zero"
-#   surrogate_type: "fno_pad" # fno, fno_pad, uno
-#   annealing:
-#     num_steps: 100
-#     sigma_max: 1
-#     sigma_min: 0.01
-#     sigma_final: 0
-#     rho: 7
-#   diffusion:
-#     num_steps: 5
-#     sigma_min: 0.001
-#     sigma_final: 0
-#     rho: 7
-#   langevin: # Best: 0.1682. Fno_pad with 100 annealing steps, 100 langevin steps, weights: 200, sigma_max: 1, lr_min_ratio: 0.2
-#     num_steps: 100
-#     lr: 1.0e-4
-#     lr_min_ratio: 0.2
-#     lr_rho: 1
-#     eta: 0.1  # noise level
-#     tau: 0.001  # the inverse of observation importance
-#     weights: [0, 200, 0, 0]
-
 
 # I/O-related
 n_plots: 4  # number of samples to plot

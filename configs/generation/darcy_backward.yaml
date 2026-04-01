@@ -8,11 +8,18 @@ data_path: 'data/DiffPDE/darcy_test_hf'
 data_offset: null
 resolution: 128  # downsampled resolution, defaults to dataset resolution
 max_size: null  # maximum number of samples to use, defaults to one epoch
-batch_size: 8
+batch_size: 160
 
 # Model options
 pkl_path: '__required__'
 rbf_scale: 0.05
+# Path to surrogate forward model (.pth) used for physics-guided guidance
+surrogate_path: '__required__'
+# Examples of surrogate models (choose ONE and update surrogate_path accordingly):
+# surrogate_path: 'artifacts/models/legacy/fno_trained_forward_darcy.pth'                       # Standard FNO surrogate for Darcy flow
+# surrogate_path: 'artifacts/models/legacy/fno_pad_trained_forward_darcy_128_500.pth'           # FNO with padding surrogate trained on full Darcy dataset
+# surrogate_path: 'artifacts/models/legacy/fno_pad_trained_forward_darcy_128_400_scarce500.pth' # FNO_pad surrogate trained on scarce Darcy data
+# surrogate_path: 'artifacts/models/legacy/uno_trained_forward_darcy.pth'                       # UNO surrogate (U-Net-like transformer) for Darcy flow
 
 # Generation options
 seed: null
@@ -44,3 +51,4 @@ guidance:
 n_plots: 4  # number of samples to plot
 n_process_steps: 10  # number of steps to plot process
 wandb: "offline"
+plot_spectral_energy: true  # enable spectral energy plots comparing predicted vs ground truth
