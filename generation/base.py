@@ -366,6 +366,13 @@ class PDESolver:
             final_stats[f"{metric_name}_mean"] = float(mean)
             final_stats[f"{metric_name}_std"] = float(std)
 
+        # Add spectral relative errors (geometric mean) if computed
+        if getattr(self, "all_spectral_geometric_means", None):
+            for c, values in enumerate(self.all_spectral_geometric_means):
+                if len(values) > 0:
+                    avg_geo_mean = float(np.mean(values))
+                    final_stats[f"spectral_rel_error_channel{c}_geometric_mean"] = avg_geo_mean
+
         # Save complete results to JSON
         if save_dir is not None:
             output_path = f"{self.save_dir}/metrics.json"

@@ -47,99 +47,106 @@ class PDESolverDPS(PDESolver):
         self.weights = config["guidance"]["weights"]
 
         # ADDED: forward surrogate to synthesize the second channel when DM is one-channel
-        # Make it adaptable to FNO, FNO_pad, and SongUNO based on configuration and available models
-        # The surrogate_type config option allows switching between different surrogate types
-        surrogate_type = config.get("guidance", {}).get("surrogate_type", "auto")  # Look in guidance section, default to auto-detection for backward compatibility
+        # Make it adaptable to FNO, FNO_pad, SongUNO, and related variants based on configuration and available models.
+        # The surrogate_type config option allows switching between different surrogate types.
+        guidance_cfg = config.get("guidance", {})
+        # Config.get supports a default argument; always pass one to avoid ConfigKeyError
+        surrogate_type = guidance_cfg.get("surrogate_type", "auto")  # default to auto-detection for backward compatibility
+        # Allow users to specify an explicit surrogate checkpoint path (recommended)
+        # Prefer path under guidance.surrogate_path, but also support a top-level surrogate_path for convenience.
+        surrogate_path = guidance_cfg.get("surrogate_path", None) or config.get("surrogate_path", None)
         print(f"Using surrogate_type: {surrogate_type}")
+        if surrogate_path is not None:
+            print(f"Using surrogate_path from config: {surrogate_path}")
 
-        # Auto-detect the best available model if surrogate_type is "auto"
-        if surrogate_type.lower() == "auto":
+        # Auto-detect the best available model if surrogate_type is "auto" and
+        # no explicit surrogate_path was provided.
+        if surrogate_type.lower() == "auto" and surrogate_path is None:
             # Check for available models in order of preference
-            if f"generation/uno_trained_forward_{config['dataset']}.pth" in os.listdir("generation"):
+            generation_files = set(os.listdir("generation")) if os.path.isdir("generation") else set()
+            if f"uno_trained_forward_{config['dataset']}.pth" in generation_files:
                 surrogate_type = "uno"
                 print("Auto-detected SongUNO surrogate model")
-            elif f"generation/fno_pad_trained_forward_{config['dataset']}.pth" in os.listdir("generation"):
+            elif f"fno_pad_trained_forward_{config['dataset']}.pth" in generation_files:
                 surrogate_type = "fno_pad"
                 print("Auto-detected FNO_pad surrogate model")
-            elif f"generation/fno_trained_forward_{config['dataset']}.pth" in os.listdir("generation"):
+            elif f"fno_trained_forward_{config['dataset']}.pth" in generation_files:
                 surrogate_type = "fno"
                 print("Auto-detected FNO surrogate model")
             else:
                 surrogate_type = "fno"  # Default fallback
                 print("No specific model found, defaulting to FNO")
-        
+
+        # Surrogate architecture: read from config['surrogate_config'] with per-type defaults.
+        surr_cfg_raw = config.get("surrogate_config", None)
+        if surr_cfg_raw is not None and hasattr(surr_cfg_raw, "to_dict"):
+            surr_cfg = surr_cfg_raw.to_dict()
+        elif isinstance(surr_cfg_raw, dict):
+            surr_cfg = surr_cfg_raw
+        else:
+            surr_cfg = {}
+
+        def _merge_fno_kwargs(defaults):
+            out = dict(defaults)
+            for k, v in surr_cfg.items():
+                if k in out:
+                    if k == "n_modes" and isinstance(v, list):
+                        out[k] = tuple(v)
+                    else:
+                        out[k] = v
+            return out
+
+        # Default model_path templates (used only when surrogate_path is not provided).
+        default_model_path = None
+        fno_defaults = {"n_modes": (64, 64), "in_channels": 1, "out_channels": 1, "hidden_channels": 64, "n_layers": 4}
+        fno_small_defaults = {"n_modes": (32, 32), "in_channels": 1, "out_channels": 1, "hidden_channels": 64, "n_layers": 4}
+        uno_defaults = {"img_resolution": 64, "in_channels": 1, "out_channels": 1, "fmult": 0.5, "rank": 0.15, "model_channels": 64, "channel_mult": [1, 2, 2], "num_blocks": 2, "attn_resolutions": [16], "dropout": 0.10, "cond": False}
+
         if surrogate_type.lower() == "uno":
-            # Initialize UNO surrogate with optimal configuration from training_fno.py
-            self.surrogate = SongUNOWrapper(
-                img_resolution=64,
-                in_channels=1,
-                out_channels=1,
-                fmult=0.5,
-                rank=0.15,  # Slightly increased from 0.1 for better expressiveness
-                model_channels=64,  # Increased from 64 to 68 for ~1.5x parameters
-                channel_mult=[1, 2, 2],  # Keep original for controlled growth
-                num_blocks=2,  # Keep original for controlled growth
-                attn_resolutions=[16],
-                dropout=0.10,
-                cond=False,
-            )
-            model_path = f"generation/uno_trained_forward_{config['dataset']}.pth"
+            self.surrogate = SongUNOWrapper(**_merge_fno_kwargs(uno_defaults))
+            default_model_path = f"generation/uno_trained_forward_{config['dataset']}.pth"
         elif surrogate_type.lower() == "fno_pad":
-            # Initialize FNO_pad surrogate (recommended for Helmholtz equation)
-            self.surrogate = FNO_pad(
-                n_modes=(64, 64),
-                in_channels=1,
-                out_channels=1,
-                hidden_channels=64,
-                n_layers=4
-            )
-            model_path = f"generation/fno_pad_trained_forward_{config['dataset']}.pth"
+            self.surrogate = FNO_pad(**_merge_fno_kwargs(fno_defaults))
+            default_model_path = f"generation/fno_pad_trained_forward_{config['dataset']}.pth"
         elif surrogate_type.lower() == "fno_pad_scarce":
-            self.surrogate = FNO_pad(
-                n_modes=(32, 32),
-                in_channels=1,
-                out_channels=1,
-                hidden_channels=64,
-                n_layers=4
-            )
-            model_path = f"generation/fno_pad_trained_forward_{config['dataset']}_128_400_scarce500.pth"
+            self.surrogate = FNO_pad(**_merge_fno_kwargs(fno_small_defaults))
+            default_model_path = f"generation/fno_pad_trained_forward_{config['dataset']}_128_400_scarce500.pth"
         elif surrogate_type.lower() == "fno_pad_64":
-            self.surrogate = FNO_pad(
-                n_modes=(32, 32),
-                in_channels=1,
-                out_channels=1,
-                hidden_channels=64,
-                n_layers=4
-            )
-            model_path = f"generation/fno_pad_trained_forward_{config['dataset']}_64.pth"
+            self.surrogate = FNO_pad(**_merge_fno_kwargs(fno_small_defaults))
+            default_model_path = f"generation/fno_pad_trained_forward_{config['dataset']}_64.pth"
         elif surrogate_type.lower() == "fno_pad_mix":
-            self.surrogate = FNO_pad(
-                n_modes=(32, 32),
-                in_channels=1,
-                out_channels=1,
-                hidden_channels=64,
-                n_layers=4
-            )
-            model_path = f"generation/fno_pad_trained_forward_{config['dataset']}_mix.pth"
+            self.surrogate = FNO_pad(**_merge_fno_kwargs(fno_small_defaults))
+            default_model_path = f"generation/fno_pad_trained_forward_{config['dataset']}_mix.pth"
         else:
             # Surrogate Not Specified/Used
             self.surrogate = None
-            model_path = None
+            default_model_path = None
             print(f"Warning: surrogate_type '{surrogate_type}' not recognized. Surrogate will not be used.")
             return
-            
-        # Load trained forward surrogate (skip if surrogate is None)
+
+        # Decide which path to use for loading weights (if any).
+        # Priority:
+        #   1) Explicit surrogate_path from config (recommended, model-agnostic)
+        #   2) Legacy default_model_path based on dataset/surrogate_type (for backward compatibility)
+        model_path = surrogate_path or default_model_path
+
+        # Load trained forward surrogate (skip if surrogate is None or no path is provided)
         if self.surrogate is not None and model_path is not None:
             print(f'Using surrogate path: {model_path}')
             try:
-                # Check if weights_only is supported (PyTorch >= 1.13.0)
                 if hasattr(torch, '__version__') and torch.__version__ >= '1.13.0':
-                    state_dict = torch.load(model_path, weights_only=True)
+                    loaded = torch.load(model_path, weights_only=True)
                 else:
-                    state_dict = torch.load(model_path)
+                    loaded = torch.load(model_path)
             except Exception:
-                state_dict = torch.load(model_path)
-            
+                loaded = torch.load(model_path)
+            # Support both raw state dict and training checkpoint format {'epoch', 'model_state', 'optimizer_state', 'config'}
+            if isinstance(loaded, dict) and "model_state" in loaded:
+                state_dict = loaded["model_state"]
+                print("Checkpoint format: training checkpoint (using 'model_state').")
+            else:
+                state_dict = loaded
+                print("Checkpoint format: state dict.")
             self.surrogate.load_state_dict(state_dict)
             self.surrogate.to(self.device)
             self.surrogate.eval()

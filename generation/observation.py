@@ -190,7 +190,7 @@ class FNOObservation(Observation):
     Enforces self-consistency between
         • channel 0 (parameters) and
         • channel 1 (solution)
-    via a frozen, pre-trained FNO stored in 'fno_trained.pth'.
+    via a frozen, pre-trained FNO stored under artifacts/models/legacy.
     """
 
     # --------------------------------------------------------------- #
@@ -212,7 +212,7 @@ class FNOObservation(Observation):
         task = config.get("task", "forward").lower()
         if task not in {"forward", "inverse"}:
             raise ValueError(f"unknown task '{task}'; expected 'forward' or 'inverse'")
-        model_path = f"generation/fno_trained_{task}_{dataset_name}.pth"
+        model_path = f"artifacts/models/legacy/fno_trained_{task}_{dataset_name}.pth"
 
         try:
             state_dict = torch.load(model_path, weights_only=False)

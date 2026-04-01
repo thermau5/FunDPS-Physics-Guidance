@@ -119,7 +119,7 @@ class PDESolverDAPS_MultiRes(PDESolverDAPS):
             device = xt.device
             self.surrogate = self.surrogate.to(device)
             x_for_sur = xt.to(dtype=torch.float32, device=device)
-            sol_pred = self.surrogate(x_for_sur)
+            sol_pred = self._predict_solution_from_normalized_source(x_for_sur)
             xt = torch.cat([x_for_sur, sol_pred], dim=1)
 
         # Final downsampling if needed

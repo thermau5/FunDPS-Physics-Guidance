@@ -137,6 +137,7 @@ class NumericalPoissonWrapper(torch.nn.Module):
         # Get sparse matrix and convert to dense
         A_sparse = self._build_poisson_matrix(S, device, dtype)
         A_dense = A_sparse.to_dense()
+        A_dense.requires_grad_(False)
         
         # Matrix is built from constants, so naturally doesn't require gradients
         # torch.linalg.solve will still compute gradients w.r.t. the right-hand side (input)
@@ -171,7 +172,17 @@ class NumericalPoissonWrapper(torch.nn.Module):
         A_dense = self._get_dense_matrix(S, device, dtype)  # [N, N]
         
         # Reshape input: [B, 1, H, W] -> [B, H*W]
-        f_vec = x.view(batch_size, -1)  # [B, N]
+        f_vec = x.view(batch_size, -1).clone()  # [B, N]
+        # Enforce homogeneous Dirichlet BC consistently in RHS.
+        # Boundary rows in A are identity rows (phi_boundary = 0), so RHS must be zero there.
+        x_bc = x[:, 0]
+        boundary_mask = torch.zeros((height, width), dtype=torch.bool, device=device)
+        boundary_mask[0, :] = True
+        boundary_mask[-1, :] = True
+        boundary_mask[:, 0] = True
+        boundary_mask[:, -1] = True
+        x_bc = x_bc.masked_fill(boundary_mask.unsqueeze(0), 0.0)
+        f_vec = x_bc.view(batch_size, -1)
         
         # Batch solve: A_dense @ phi_vec = f_vec
         # A_dense: [N, N], f_vec: [B, N] -> phi_vec: [B, N]
@@ -399,9 +410,9 @@ class PDESolverDAPS(PDESolver):
         - dataset (str): Dataset name for loading the appropriate trained surrogate model
         
     Auto-detection priority (when surrogate_type="auto"):
-        1. SongUNO (uno_trained_forward_{dataset}.pth)
-        2. FNO_pad (fno_pad_trained_forward_{dataset}.pth) 
-        3. FNO (fno_trained_forward_{dataset}.pth)
+        1. SongUNO (artifacts/models/legacy/uno_trained_forward_{dataset}.pth)
+        2. FNO_pad (artifacts/models/legacy/fno_pad_trained_forward_{dataset}.pth)
+        3. FNO (artifacts/models/legacy/fno_trained_forward_{dataset}.pth)
         4. Numerical Poisson (if dataset="poisson" and solver available)
         
     Example config:
@@ -415,6 +426,16 @@ class PDESolverDAPS(PDESolver):
     def __init__(self, config):
 
         super().__init__(config)
+
+        self.task = (config.get("task", "inverse") or "inverse").lower()
+        if self.task not in {"forward", "inverse", "forward_inverse"}:
+            print(f"Warning: unknown task '{self.task}', defaulting to 'inverse'")
+            self.task = "inverse"
+
+        # Optionally report which diffusion model checkpoint is being used
+        diffusion_path = config.get("pkl_path", None)
+        if diffusion_path is not None:
+            print(f"Using diffusion path: {diffusion_path}")
 
         self.annealing_config = config["guidance"]["annealing"].to_dict()
         self.diffusion_config = config["guidance"]["diffusion"].to_dict()
@@ -446,24 +467,32 @@ class PDESolverDAPS(PDESolver):
         self.save_indices = np.linspace(0, self.num_steps - 1, self.n_process_steps, dtype=int)
 
         # ADDED: forward surrogate to synthesize the second channel when DM is one-channel
-        # Make it adaptable to FNO, FNO_pad, and SongUNO based on configuration and available models
-        # The surrogate_type config option allows switching between different surrogate types
-        surrogate_type = config.get("guidance", {}).get("surrogate_type", "auto")  # Look in guidance section, default to auto-detection for backward compatibility
+        # Make it adaptable to FNO, FNO_pad, SongUNO, PINO, and numerical Poisson based on configuration and available models.
+        # The surrogate_type config option allows switching between different surrogate types.
+        guidance_cfg = config.get("guidance", {})
+        # Config.get supports a default argument; always pass one to avoid ConfigKeyError
+        surrogate_type = guidance_cfg.get("surrogate_type", "auto")  # default to auto-detection for backward compatibility
+        # Allow users to specify an explicit surrogate checkpoint path (recommended)
+        # Prefer path under guidance.surrogate_path, but also support a top-level surrogate_path for convenience.
+        surrogate_path = guidance_cfg.get("surrogate_path", None) or config.get("surrogate_path", None)
         print(f"Using surrogate_type: {surrogate_type}")
 
-        # Auto-detect the best available model if surrogate_type is "auto"
-        if surrogate_type.lower() == "auto":
+        # Auto-detect the best available model if surrogate_type is "auto" and
+        # no explicit surrogate_path was provided.
+        if surrogate_type.lower() == "auto" and surrogate_path is None:
             # Check for available models in order of preference
-            if f"generation/uno_trained_forward_{config['dataset']}.pth" in os.listdir("generation"):
+            legacy_models_dir = os.path.join("artifacts", "models", "legacy")
+            generation_files = set(os.listdir(legacy_models_dir)) if os.path.isdir(legacy_models_dir) else set()
+            if f"uno_trained_forward_{config['dataset']}.pth" in generation_files:
                 surrogate_type = "uno"
                 print("Auto-detected SongUNO surrogate model")
-            elif f"generation/fno_pad_trained_forward_{config['dataset']}.pth" in os.listdir("generation"):
+            elif f"fno_pad_trained_forward_{config['dataset']}_128_500.pth" in generation_files:
                 surrogate_type = "fno_pad"
                 print("Auto-detected FNO_pad surrogate model")
-            elif f"generation/fno_trained_forward_{config['dataset']}.pth" in os.listdir("generation"):
+            elif f"fno_trained_forward_{config['dataset']}.pth" in generation_files:
                 surrogate_type = "fno"
                 print("Auto-detected FNO surrogate model")
-            elif f"generation/pino_trained_forward_{config['dataset']}.pth" in os.listdir("generation"):
+            elif f"pino_trained_forward_{config['dataset']}.pth" in generation_files:
                 surrogate_type = "pino"
                 print("Auto-detected PINO surrogate model")
             elif HAS_NUMERICAL_POISSON and config.get('dataset', '').lower() == 'poisson':
@@ -473,70 +502,53 @@ class PDESolverDAPS(PDESolver):
                 surrogate_type = "fno"  # Default fallback
                 print("No specific model found, defaulting to FNO")
         
+        # Surrogate architecture: read from config['surrogate_config'] with per-type defaults.
+        surr_cfg_raw = config.get("surrogate_config", None)
+        if surr_cfg_raw is not None and hasattr(surr_cfg_raw, "to_dict"):
+            surr_cfg = surr_cfg_raw.to_dict()
+        elif isinstance(surr_cfg_raw, dict):
+            surr_cfg = surr_cfg_raw
+        else:
+            surr_cfg = {}
+
+        def _merge_fno_kwargs(defaults):
+            out = dict(defaults)
+            for k, v in surr_cfg.items():
+                if k in out:
+                    if k == "n_modes" and isinstance(v, list):
+                        out[k] = tuple(v)
+                    else:
+                        out[k] = v
+            return out
+
+        # Default model_path templates (used only when surrogate_path is not provided).
+        default_model_path = None
+        fno_defaults = {"n_modes": (64, 64), "in_channels": 1, "out_channels": 1, "hidden_channels": 64, "n_layers": 4}
+        fno_small_defaults = {"n_modes": (32, 32), "in_channels": 1, "out_channels": 1, "hidden_channels": 64, "n_layers": 4}
+        uno_defaults = {"img_resolution": 64, "in_channels": 1, "out_channels": 1, "fmult": 0.5, "rank": 0.15, "model_channels": 64, "channel_mult": [1, 2, 2], "num_blocks": 2, "attn_resolutions": [16], "dropout": 0.10, "cond": False}
+
+        self.uses_numerical_poisson = surrogate_type.lower() == "numerical_poisson"
+
         if surrogate_type.lower() == "uno":
-            # Initialize UNO surrogate with optimal configuration from training_fno.py
-            self.surrogate = SongUNOWrapper(
-                img_resolution=64,
-                in_channels=1,
-                out_channels=1,
-                fmult=0.5,
-                rank=0.15,  # Slightly increased from 0.1 for better expressiveness
-                model_channels=64,  # Increased from 64 to 68 for ~1.5x parameters
-                channel_mult=[1, 2, 2],  # Keep original for controlled growth
-                num_blocks=2,  # Keep original for controlled growth
-                attn_resolutions=[16],
-                dropout=0.10,
-                cond=False,
-            )
-            model_path = f"generation/uno_trained_forward_{config['dataset']}.pth"
+            kwargs = _merge_fno_kwargs(uno_defaults)
+            self.surrogate = SongUNOWrapper(**kwargs)
+            default_model_path = f"artifacts/models/legacy/uno_trained_forward_{config['dataset']}.pth"
         elif surrogate_type.lower() == "fno_pad":
-            # Initialize FNO_pad surrogate (recommended for Helmholtz equation)
-            self.surrogate = FNO_pad(
-                n_modes=(64, 64),
-                in_channels=1,
-                out_channels=1,
-                hidden_channels=64,
-                n_layers=4
-            )
-            model_path = f"generation/fno_pad_trained_forward_{config['dataset']}_128_500.pth"
+            self.surrogate = FNO_pad(**_merge_fno_kwargs(fno_defaults))
+            default_model_path = f"artifacts/models/legacy/fno_pad_trained_forward_{config['dataset']}_128_500.pth"
         elif surrogate_type.lower() == "fno_pad_scarce":
-            self.surrogate = FNO_pad(
-                n_modes=(32, 32),
-                in_channels=1,
-                out_channels=1,
-                hidden_channels=64,
-                n_layers=4
-            )
-            model_path = f"generation/fno_pad_trained_forward_{config['dataset']}_128_400_scarce500.pth"
+            self.surrogate = FNO_pad(**_merge_fno_kwargs(fno_small_defaults))
+            default_model_path = f"artifacts/models/legacy/fno_pad_trained_forward_{config['dataset']}_128_400_scarce500.pth"
         elif surrogate_type.lower() == "fno_pad_64":
-            self.surrogate = FNO_pad(
-                n_modes=(32, 32),
-                in_channels=1,
-                out_channels=1,
-                hidden_channels=64,
-                n_layers=4
-            )
-            model_path = f"generation/fno_pad_trained_forward_{config['dataset']}_64.pth"
+            self.surrogate = FNO_pad(**_merge_fno_kwargs(fno_small_defaults))
+            default_model_path = f"artifacts/models/legacy/fno_pad_trained_forward_{config['dataset']}_64.pth"
         elif surrogate_type.lower() == "fno_pad_mix":
-            self.surrogate = FNO_pad(
-                n_modes=(32, 32),
-                in_channels=1,
-                out_channels=1,
-                hidden_channels=64,
-                n_layers=4
-            )
-            model_path = f"generation/fno_pad_trained_forward_{config['dataset']}_mix.pth"
+            self.surrogate = FNO_pad(**_merge_fno_kwargs(fno_small_defaults))
+            default_model_path = f"artifacts/models/legacy/fno_pad_trained_forward_{config['dataset']}_mix.pth"
         elif surrogate_type.lower() == "pino":
-            self.surrogate = Pino(
-                n_modes=(64, 64),
-                in_channels=1,
-                out_channels=1,
-                hidden_channels=64,
-                n_layers=4
-            )
-            model_path = f"generation/pino_trained_forward_{config['dataset']}.pth"
+            self.surrogate = Pino(**_merge_fno_kwargs(fno_defaults))
+            default_model_path = f"artifacts/models/legacy/pino_trained_forward_{config['dataset']}.pth"
         elif surrogate_type.lower() == "numerical_poisson":
-            # Use numerical Poisson solver (no neural network, no weights to load)
             if not HAS_NUMERICAL_POISSON:
                 raise ImportError(
                     "Numerical Poisson solver requested but not available. "
@@ -546,40 +558,58 @@ class PDESolverDAPS(PDESolver):
             self.surrogate = NumericalPoissonWrapper()
             model_path = None  # No model file needed
         else:
-            # Default to FNO surrogate
             print("Using Default FNO surrogate")
-            self.surrogate = FNO(
-                n_modes=(64, 64),
-                in_channels=1,
-                out_channels=1,
-                hidden_channels=64,
-                n_layers=4
-            )
-            model_path = f"generation/fno_trained_forward_{config['dataset']}.pth"
+            self.surrogate = FNO(**_merge_fno_kwargs(fno_defaults))
+            default_model_path = f"artifacts/models/legacy/fno_trained_forward_{config['dataset']}.pth"
+
+        # Decide which path to use for loading weights (if any).
+        # Priority:
+        #   1) Explicit surrogate_path from config (recommended, model-agnostic)
+        #   2) Legacy default_model_path based on dataset/surrogate_type (for backward compatibility)
+        if surrogate_type.lower() != "numerical_poisson":
+            model_path = surrogate_path or default_model_path
+        else:
+            model_path = None
         
-        # Load trained forward surrogate (skip for numerical solver)
+        # Load trained forward surrogate (skip for numerical solver or when no path is provided)
         if model_path is not None:
             print(f"Using surrogate path: {model_path}")
             try:
-                # Prefer safe loading first (PyTorch >= 1.13 with weights_only)
-                state_dict = torch.load(model_path, weights_only=True)
+                loaded = torch.load(model_path, weights_only=True)
             except TypeError:
-                # Older PyTorch without weights_only argument
-                state_dict = torch.load(model_path)
+                loaded = torch.load(model_path)
             except Exception as e:
-                # Safe loading failed (e.g. legacy checkpoints); explicit unsafe fallback
                 print(
                     f"Warning: safe torch.load(weights_only=True) failed with "
                     f"{type(e).__name__}: {e}. Falling back to weights_only=False; "
                     "only do this for trusted checkpoints."
                 )
-                state_dict = torch.load(model_path, weights_only=False)
-
+                loaded = torch.load(model_path, weights_only=False)
+            # Support both raw state dict and training checkpoint format {'epoch', 'model_state', 'optimizer_state', 'config'}
+            if isinstance(loaded, dict) and "model_state" in loaded:
+                state_dict = loaded["model_state"]
+                print("Checkpoint format: training checkpoint (using 'model_state').")
+            else:
+                state_dict = loaded
+                print("Checkpoint format: state dict.")
             self.surrogate.load_state_dict(state_dict)
         
         self.surrogate.to(self.device)
         self.surrogate.eval()
         self.surrogate.requires_grad_(False)  # freeze weights; gradients still flow to inputs
+
+    def _predict_solution_from_normalized_source(self, x_source_normalized):
+        """Predict normalized solution channel from normalized source channel.
+
+        Numerical Poisson surrogate expects/returns physical units, while learned
+        surrogates expect/return normalized units.
+        """
+        if self.uses_numerical_poisson:
+            # Channel 0 is source term f; channel 1 is solution phi.
+            x_source_physical = self.normalizer.denormalize(x_source_normalized, channel=0)
+            sol_physical = self.surrogate(x_source_physical)
+            return self.normalizer.normalize(sol_physical, channel=1)
+        return self.surrogate(x_source_normalized)
 
     def load_data(self):
         super().load_data()
@@ -645,7 +675,7 @@ class PDESolverDAPS(PDESolver):
             device = x_final.device
             self.surrogate = self.surrogate.to(device)
             x_for_sur = x_final.to(dtype=torch.float32, device=device)
-            sol_pred = self.surrogate(x_for_sur)
+            sol_pred = self._predict_solution_from_normalized_source(x_for_sur)
             x_final = torch.cat([x_for_sur, sol_pred], dim=1)
 
         pred = self.normalizer.transform(x_final, denormalize=True)
@@ -733,17 +763,20 @@ class PDESolverDAPS(PDESolver):
             # Compute loss terms
             prior_loss = ((x - x0hat.detach()) ** 2).sum()
 
-            # ADDED: if DM state is one-channel, concatenate surrogate-predicted solution channel
-            # This forward operator usage is parallel for FNO, FNO_pad, and numerical Poisson solver:
-            # - Forward pass: compute solution from source term
-            # - Gradients flow through: autograd tracks w.r.t. x (inputs)
-            # - Loss computation and backpropagation: same pattern for all surrogates
+            # If DM state is one-channel, we may need a two-channel tensor for observation losses.
+            #
+            # - inverse / forward_inverse: use surrogate inside Langevin so observation can involve solution channel.
+            # - forward: only guide on coefficient/channel-0 observations; avoid surrogate calls inside Langevin.
             if x.shape[1] == 1:
                 device = x.device
-                self.surrogate = self.surrogate.to(device)
                 x_for_sur = x.to(dtype=torch.float32, device=device)
-                sol_pred = self.surrogate(x_for_sur)            # autograd tracks w.r.t. x (parallel to FNO/FNO_pad)
-                x_for_loss = torch.cat([x_for_sur, sol_pred], dim=1)  # [B,2,H,W]
+                if self.task in {"inverse", "forward_inverse"}:
+                    self.surrogate = self.surrogate.to(device)
+                    sol_pred = self._predict_solution_from_normalized_source(x_for_sur)
+                    x_for_loss = torch.cat([x_for_sur, sol_pred], dim=1)  # [B,2,H,W]
+                else:
+                    # Dummy second channel (ignored when observation masks/weights for channel-1 are zero).
+                    x_for_loss = torch.cat([x_for_sur, torch.zeros_like(x_for_sur)], dim=1)
             else:
                 x_for_loss = x
 
