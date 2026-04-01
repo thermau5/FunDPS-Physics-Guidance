@@ -129,7 +129,7 @@ def training_loop(
             hidden_channels=64,
             n_layers=4,
         )
-        model_path = f"generation/fno_trained_forward_{dataset_name}.pth"
+        model_path = f"artifacts/models/legacy/fno_trained_forward_{dataset_name}.pth"
         # Get the major and minor version as integers
         torch_version = tuple(map(int, torch.__version__.split(".")[:2]))
 
