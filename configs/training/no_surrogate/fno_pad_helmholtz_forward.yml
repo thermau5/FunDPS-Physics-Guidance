@@ -1,0 +1,35 @@
+## FNO_pad no-surrogate training config (Helmholtz, forward)
+
+pde_direction: "forward"
+dataset_name: "helmholtz"
+
+data_resolution: 128
+train_resolution: [128, 128]
+
+batch_size: 40
+num_epochs: 500
+learning_rate: 1e-4
+
+fno_modes: [64, 64]
+in_channels: 1
+out_channels: 1
+hidden_channels: 64
+n_layers: 4
+
+use_tqdm: True # Whether to use tqdm for training progress bar
+progress_every_epochs: 10 # How frequently to print a progress bar for the training
+eval_every: 10 # How frequently to evaluate and summarize the model on the test set
+
+# Save checkpoint_epoch_*.pth every N epochs (also saves final epoch if not aligned). Use 0 for final-only.
+checkpoint_every: 100
+
+wandb_project: "ddis_fno_edm_no"
+
+# Where to record FNO no-surrogate training runs (similar to train.py -> exps/)
+exps_outdir: "exps/no_surrogate/fno_pad"
+
+# Resume from this checkpoint (optional). Training runs from (resumed_epoch+1) to num_epochs.
+# Use path relative to repo root when running from FunDPS-Physics-Guidance/ (or absolute path).
+resume: null
+# exps/no_surrogate/fno_pad/0310_173644-fno_helmholtz_forward_bs40_ep1000_m64_p35M-ij336nmf/checkpoint_epoch_800.pth
+
