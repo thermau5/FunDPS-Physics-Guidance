@@ -130,6 +130,38 @@ python train.py -c=configs/training/darcy.yml --name=darcy-test
 python generate_pde.py --config configs/generation/darcy.yaml
 ```
 
+## Unit Tests
+
+Validation scripts live in `unit_tests/`. They test individual components without running the full generation pipeline.
+
+```shell
+# Test NumericalPoissonWrapper logic (no data required)
+python unit_tests/test_poisson_solver.py
+
+# Validate NumericalPoissonWrapper against real Poisson dataset
+python unit_tests/test_poisson_solver.py --data-path data/DiffPDE/poisson_test_hf --save-dir exps/tests/poisson_solver
+
+# Validate a trained FNO/FNO_pad surrogate (architecture auto-detected from checkpoint)
+python unit_tests/test_fno_surrogate.py --model-path <path-to-model.pth> --data-path data/DiffPDE/helmholtz_test_hf
+
+# Validate a trained PINO surrogate
+python unit_tests/test_pino_surrogate.py --model-path <path-to-model.pth>
+```
+
+Outputs (visualizations, metrics) are saved under `exps/tests/`.
+
+## Visualization
+
+Analysis and plotting scripts live in `visualization/scripts/`.
+
+```shell
+# Aggregate and plot sweep results
+python visualization/scripts/aggregate_sweep_results.py
+
+# Power spectrum comparison across methods
+python visualization/scripts/power_spectrum.py
+```
+
 ## Contributing
 
 Please apply the `black` code formatter with the `--line-length=200` option. We typically wouldn't opt for such a long line length, but due to numerous existing lengthy lines, this will help reduce discrepancies.
