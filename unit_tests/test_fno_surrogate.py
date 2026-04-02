@@ -1,5 +1,9 @@
 # test_fno_surrogate.py
 
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import argparse
 import torch
 import torch.nn.functional as F
@@ -94,7 +98,7 @@ parser.add_argument("--model-path", "-m", required=True, help=".pth file of trai
 parser.add_argument("--mode", choices=["forward", "inverse"], default="forward", help="‘forward’: param→solution; ‘inverse’: solution→param.")
 parser.add_argument("--data-path", "-d", default="data/DiffPDE/helmholtz_test_hf", help="Path to test dataset.")
 parser.add_argument("--batch-size", "-b", type=int, default=25, help="Batch size for DataLoader.")
-parser.add_argument("--output-dir", "-o", default="prediction_visualizations", help="Directory to save prediction visualization examples.")
+parser.add_argument("--output-dir", "-o", default="exps/tests/fno_surrogate", help="Directory to save prediction visualization examples.")
 parser.add_argument("--save-examples", "-s", type=int, default=5, help="Number of prediction examples to save as images.")
 args = parser.parse_args()
 
@@ -104,54 +108,110 @@ args = parser.parse_args()
 # ----------------------------
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Automatically detect model type based on filename and create appropriate architecture
-model_path = args.model_path
-if "uno_trained" in model_path:
-    print("Detected SongUNO model, creating SongUNOWrapper...")
-    model = SongUNOWrapper(
-        img_resolution=64,
-        in_channels=1,
-        out_channels=1,
-        fmult=0.5,
-        rank=0.15,
-        model_channels=64,
-        channel_mult=[1, 2, 2],
-        num_blocks=2,
-        attn_resolutions=[16],
-        dropout=0.10,
-        cond=False,
-    ).to(device)
-elif "fno_pad_trained" in model_path:
-    print("Detected FNO_pad model, creating FNO_pad architecture...")
-    model = FNO_pad(n_modes=(32, 32), in_channels=1, out_channels=1, hidden_channels=64, n_layers=4).to(device)
-elif "fno_trained" in model_path and "fno_pad_trained" not in model_path:
-    # Standard FNO models should use FNO architecture
-    print("Detected FNO model, creating standard FNO architecture...")
-    model = FNO(n_modes=(64, 64), in_channels=1, out_channels=1, hidden_channels=64, n_layers=4).to(device)
-else:
-    # Default to FNO_pad for unknown FNO models (safer for PDEs)
-    print("Model type unclear, defaulting to FNO_pad architecture...")
-    model = FNO_pad(n_modes=(64, 64), in_channels=1, out_channels=1, hidden_channels=64, n_layers=4).to(device)
 
-print(f"Loading {args.mode} surrogate from {model_path}…")
-# Final model loading (architecture already determined and tested above)
-try:
-    # Check if weights_only is supported (PyTorch >= 1.13.0)
-    if hasattr(torch, "__version__") and torch.__version__ >= "1.13.0":
-        model.load_state_dict(torch.load(args.model_path, map_location=device, weights_only=True))
-        print("Model loaded successfully with weights_only=True")
-    else:
-        state_dict = torch.load(args.model_path, map_location=device)
-        if "model_state_dict" in state_dict:
-            state_dict = state_dict["model_state_dict"]
-        model.load_state_dict(state_dict)
-        print("Model loaded successfully (PyTorch < 1.13.0, no weights_only)")
-except Exception as e:
-    print(f"weights_only=True failed: {e}")
-    print("Trying with weights_only=False (less secure but compatible)...")
-    # Fallback to weights_only=False for older model formats
-    model.load_state_dict(torch.load(args.model_path, map_location=device, weights_only=False))
-    print("Model loaded successfully with weights_only=False")
+def _load_state_dict(path):
+    """Load checkpoint, returning (state_dict, config_or_None)."""
+    try:
+        ckpt = torch.load(path, map_location="cpu", weights_only=False)
+    except Exception:
+        ckpt = torch.load(path, map_location="cpu", weights_only=False)
+    if isinstance(ckpt, dict) and "model_state" in ckpt:
+        return ckpt["model_state"], ckpt.get("config")
+    if isinstance(ckpt, dict) and "model_state_dict" in ckpt:
+        return ckpt["model_state_dict"], ckpt.get("config")
+    # Raw state dict
+    return ckpt, None
+
+
+def _is_uno(state_dict):
+    """Return True if state dict looks like SongUNO (has UNet-style keys)."""
+    keys = list(state_dict.keys())
+    return any(k.startswith("model.enc") or k.startswith("enc.") or "map_noise" in k for k in keys)
+
+
+def _fno_dims_from_state(state_dict):
+    """Infer (n_modes, hidden_channels, n_layers, in_channels, out_channels) from FNO state dict."""
+    import re
+    hidden_channels = 64
+    in_channels = 1
+    out_channels = 1
+    n_modes = (64, 64)
+    n_layers = 4
+
+    # hidden_channels and n_modes from spectral conv weights: shape [hidden, hidden, m0, m1_rfft]
+    # where m1_rfft = n_modes[1]//2+1, so n_modes[1] = (m1_rfft-1)*2
+    for k, v in state_dict.items():
+        if "fno_blocks" in k and "convs" in k and "weight" in k and v.dim() == 4:
+            hidden_channels = v.shape[0]
+            m0, m1 = v.shape[2], v.shape[3]
+            n_modes = (m0, (m1 - 1) * 2)
+            break
+
+    # in_channels from lifting MLP first FC: shape [2*hidden, in_channels+2_grid_coords, 1]
+    # FNO internally appends 2 grid coordinate channels, so subtract 2
+    for k, v in state_dict.items():
+        if k.startswith("lifting") and "fcs.0.weight" in k and v.dim() >= 2:
+            in_channels = max(1, v.shape[1] - 2)
+            break
+
+    # out_channels from the last projection FC layer
+    proj_layers = {}
+    for k, v in state_dict.items():
+        if k.startswith("projection") and "fcs" in k and "weight" in k:
+            m = re.search(r"fcs\.(\d+)\.weight", k)
+            if m:
+                proj_layers[int(m.group(1))] = v
+    if proj_layers:
+        out_channels = proj_layers[max(proj_layers)].shape[0]
+
+    # n_layers from fno_blocks spectral conv indices
+    layer_indices = set()
+    for k in state_dict.keys():
+        m = re.search(r"fno_blocks\.convs\.(\d+)\.", k)
+        if m:
+            layer_indices.add(int(m.group(1)))
+    if layer_indices:
+        n_layers = max(layer_indices) + 1
+
+    return n_modes, hidden_channels, n_layers, in_channels, out_channels
+
+
+def _build_model(path):
+    """Detect architecture from checkpoint and return a ready-to-load model."""
+    state_dict, cfg = _load_state_dict(path)
+
+    # 1. Config key present (training checkpoint) — most reliable
+    if cfg is not None:
+        n_modes = tuple(cfg.get("fno_modes", [64, 64]))
+        hidden = cfg.get("hidden_channels", 64)
+        n_layers = cfg.get("n_layers", 4)
+        in_ch = cfg.get("in_channels", 1)
+        out_ch = cfg.get("out_channels", 1)
+        print(f"Architecture from checkpoint config: FNO_pad n_modes={n_modes} hidden={hidden} n_layers={n_layers}")
+        return FNO_pad(n_modes=n_modes, in_channels=in_ch, out_channels=out_ch,
+                       hidden_channels=hidden, n_layers=n_layers).to(device), state_dict
+
+    # 2. Probe state dict keys
+    if _is_uno(state_dict):
+        print("Detected SongUNO from state dict keys.")
+        model = SongUNOWrapper(
+            img_resolution=64, in_channels=1, out_channels=1,
+            fmult=0.5, rank=0.15, model_channels=64,
+            channel_mult=[1, 2, 2], num_blocks=2,
+            attn_resolutions=[16], dropout=0.10, cond=False,
+        ).to(device)
+        return model, state_dict
+
+    n_modes, hidden, n_layers, in_ch, out_ch = _fno_dims_from_state(state_dict)
+    print(f"Inferred FNO_pad from state dict: n_modes={n_modes} hidden={hidden} n_layers={n_layers}")
+    return FNO_pad(n_modes=n_modes, in_channels=in_ch, out_channels=out_ch,
+                   hidden_channels=hidden, n_layers=n_layers).to(device), state_dict
+
+
+print(f"Loading {args.mode} surrogate from {args.model_path}…")
+model, state_dict = _build_model(args.model_path)
+model.load_state_dict(state_dict)
+print("Model loaded successfully.")
 model.eval()
 
 

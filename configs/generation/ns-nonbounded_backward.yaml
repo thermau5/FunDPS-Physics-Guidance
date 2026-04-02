@@ -14,7 +14,7 @@ batch_size: 160  # full batch = 1000
 pkl_path: model/diffusion/ns-nonbounded/network-snapshot-10000008.pkl
 rbf_scale: 0.05
 # Path to surrogate forward model (.pth) used for physics-guided guidance
-surrogate_path: model/no_surrogate/fno_pad/forward_ns-nonbounded/128/500/fno_trained_500_hcugvf91.pth
+surrogate_path: model/no_surrogate/fno_pad/forward_ns-nonbounded/128/400/fno_pad_trained_forward_ns-nonbounded_128_400_.pth
 surrogate_config:
   n_modes: [64, 64]
   in_channels: 1
@@ -58,7 +58,7 @@ observation:
 #   upsampling_mode: "bilinear"
 guidance:
   type: "daps"
-  surrogate_type: "fno_pad_scarce" # fno, fno_pad, fno_pad_mix, uno
+  surrogate_type: "fno_pad" # fno, fno_pad, fno_pad_mix, uno
   # Super-resolution guidance
   sigma_min_1: 0.005
   sigma_max_2: 5
@@ -79,7 +79,7 @@ guidance:
   langevin:
     num_steps: 20 # 8.22% with annealing/langevin steps = 100/20, weights = 15; 8.31% with weights_1 = 20, weights_2 = 10
     lr: 1.0e-4
-    lr_min_ratio: 0.005
+    lr_min_ratio: 0.01
     lr_rho: 1
     eta: 0.1  # noise level
     tau: 0.001  # the inverse of observation importance

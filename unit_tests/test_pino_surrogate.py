@@ -11,13 +11,15 @@ Usage:
         --save-examples 10
 """
 
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import argparse
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
-import os
-import sys
 import numpy as np
 from neuralop.models.fno import FNO
 from training.dataset_hf import PDEDataset
