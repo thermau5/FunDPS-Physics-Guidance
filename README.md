@@ -122,13 +122,34 @@ wandb init
 
 ## Usage
 
-```shell
-# Train a new diffusion model on the Darcy Flow dataset.
-python train.py -c=configs/training/darcy.yml --name=darcy-test
+### Training
 
-# Recover both spaces with observation on both sides
-python generate_pde.py --config configs/generation/darcy.yaml
+**Diffusion model** (backbone for generation):
+
+```shell
+python scripts/train/train.py -c configs/training/poisson.yml --name poisson-run
 ```
+
+Configs for each PDE are in `configs/training/` (e.g. `poisson.yml`, `helmholtz.yml`, `ns-nonbounded.yml`).
+
+**FNO surrogate** (physics guidance model, trained separately):
+
+```shell
+python scripts/train/training_fno.py --config configs/training/no_surrogate/fno_pad_poisson_forward.yml
+```
+
+Surrogate configs are in `configs/training/no_surrogate/`, one per PDE and direction (forward/backward).
+
+### Inference
+
+```shell
+python scripts/generate/generate_pde.py --config configs/generation/poisson_backward.yaml
+```
+
+Generation configs are in `configs/generation/`. Key options to set in the config:
+- `surrogate_type`: `fno_pad` (learned surrogate) or `numerical_poisson` (exact solver, Poisson only)
+- `surrogate_path`: path to trained FNO `.pth` file
+- `guidance.type`: `daps` (recommended) or `dps`
 
 ## Unit Tests
 
