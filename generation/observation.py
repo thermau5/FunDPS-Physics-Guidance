@@ -182,7 +182,7 @@ class PDEObservation(Observation):
         return loss
 
 
-from neuralop.models.fno_legacy import FNO  # ≈ the same import you used in training
+from neuralop.models.fno import FNO  # ≈ the same import you used in training
 
 
 class FNOObservation(Observation):
