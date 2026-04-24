@@ -12,21 +12,8 @@ from .base import PDESolver
 from generation.observation import FNO  # For FNO surrogate
 from training.networks import SongUNO  # For UNO surrogate
 
-# Import numerical Poisson solver
-try:
-    import sys
-    import os
-
-    # Add parent directory to path to import poisson_numerical_solver
-    parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    if parent_dir not in sys.path:
-        sys.path.insert(0, parent_dir)
-    from poisson_numerical_solver import forward_poisson
-
-    HAS_NUMERICAL_POISSON = True
-except ImportError as e:
-    print(f"Warning: Could not import numerical Poisson solver: {e}")
-    HAS_NUMERICAL_POISSON = False
+# NumericalPoissonWrapper is fully self-contained below (no external solver file needed)
+HAS_NUMERICAL_POISSON = True
 
 
 # Custom FNO_pad class to match training architecture
@@ -58,149 +45,77 @@ class SongUNOWrapper(torch.nn.Module):
 
         return self.model(x, noise_labels, None)
 
-# Wrapper class for numerical Poisson solver (GPU-accelerated)
+# Wrapper class for numerical Poisson solver (GPU-accelerated, FFT-based)
 class NumericalPoissonWrapper(torch.nn.Module):
-    """GPU-accelerated wrapper for numerical Poisson solver using PyTorch.
+    """Solves Δφ = f with homogeneous Dirichlet BCs via 2D DST-I (O(N log N)).
 
-    Takes input tensor [B, 1, H, W] (source term f) and returns [B, 1, H, W] (solution φ).
-    Supports gradients through torch.linalg.solve, allowing backpropagation w.r.t. inputs.
-    Parallel to FNO/FNO_pad in terms of forward operator usage and gradient flow.
+    Takes [B, 1, H, W] (source term f) and returns [B, 1, H, W] (solution φ).
+    Gradients flow through torch.fft, supporting backprop w.r.t. inputs.
+
+    Algorithm: diagonalise the 5-point stencil Laplacian with the discrete sine
+    transform (DST-I).  For interior grid size M = H-2 and h = 1/(H-1):
+        A φ_int = h² f_int,   A = T⊗I + I⊗T,  T = tridiag(1,-2,1)
+        eigenvalues: λ_{mn} = 2cos(mπ/(M+1)) + 2cos(nπ/(M+1)) - 4
+        φ_int = IDST2(DST2(h² f_int) / λ)
     """
 
     def __init__(self):
         super().__init__()
-        # Cache sparse and dense matrices for different grid sizes (lazy initialization)
-        self._sparse_matrix_cache = {}
-        self._dense_matrix_cache = {}
+        self._eigenvalue_cache = {}
 
-    def _build_poisson_matrix(self, S, device, dtype):
-        """Build the sparse Poisson matrix A for grid size S on the given device.
+    @staticmethod
+    def _dst1_1d(x):
+        """1D DST-I along last dim via FFT extension.
 
-        The matrix represents: A @ phi_vec = f_vec where Δφ = f
+        Convention: V_k = Σ_{n=1}^{M} v_n sin(nkπ/(M+1)), k=1..M
+        Self-inverse up to factor (M+1)/2: DST(DST(v)) = (M+1)/2 · v
         """
-        cache_key = (S, device, dtype)
-        if cache_key in self._sparse_matrix_cache:
-            return self._sparse_matrix_cache[cache_key]
+        M = x.shape[-1]
+        N = 2 * (M + 1)
+        z = torch.zeros(x.shape[:-1] + (1,), device=x.device, dtype=x.dtype)
+        # Anti-symmetric extension: [0, v, 0, -flip(v)]
+        x_ext = torch.cat([z, x, z, x.flip(-1).neg()], dim=-1)
+        X = torch.fft.rfft(x_ext, n=N, dim=-1)
+        # Im(FFT_k) = -2 V_k  =>  V_k = -Im(FFT_k)/2
+        return -X.imag[..., 1 : M + 1] / 2.0
 
-        h = 1.0 / (S - 1)
-        N = S * S
+    @classmethod
+    def _dst2_2d(cls, x):
+        """2D DST-I: apply 1D DST-I along rows then columns."""
+        return cls._dst1_1d(cls._dst1_1d(x.transpose(-1, -2)).transpose(-1, -2))
 
-        # Build indices and values for sparse matrix
-        indices = []
-        values = []
-
-        for i in range(S):
-            for j in range(S):
-                k = i * S + j  # linear index
-
-                # Dirichlet boundary: φ = 0
-                if i == 0 or i == S - 1 or j == 0 or j == S - 1:
-                    indices.append([k, k])
-                    values.append(1.0)
-                else:
-                    # Interior points: 5-point stencil
-                    indices.append([k, k])  # center
-                    values.append(-4.0 / h**2)
-
-                    indices.append([k, k - 1])  # left (i, j-1)
-                    values.append(1.0 / h**2)
-
-                    indices.append([k, k + 1])  # right (i, j+1)
-                    values.append(1.0 / h**2)
-
-                    indices.append([k, k - S])  # down (i-1, j)
-                    values.append(1.0 / h**2)
-
-                    indices.append([k, k + S])  # up (i+1, j)
-                    values.append(1.0 / h**2)
-
-        # Convert to tensors
-        indices_tensor = torch.tensor(indices, dtype=torch.long, device=device).t()
-        values_tensor = torch.tensor(values, dtype=dtype, device=device)
-
-        # Create sparse matrix in COO format, then convert to CSR for efficient solving
-        A_sparse = torch.sparse_coo_tensor(indices_tensor, values_tensor, (N, N))
-        A_sparse = A_sparse.coalesce()  # Sort indices and sum duplicates
-
-        # Cache the sparse matrix
-        self._sparse_matrix_cache[cache_key] = A_sparse
-
-        return A_sparse
-
-    def _get_dense_matrix(self, S, device, dtype):
-        """Get dense version of Poisson matrix (cached).
-
-        Note: The matrix itself is built from constant values (no gradients needed),
-        but gradients will flow through torch.linalg.solve w.r.t. the input tensor.
-        This is parallel to how FNO/FNO_pad work: fixed weights, gradients flow through inputs.
-        """
-        cache_key = (S, device, dtype)
-        if cache_key in self._dense_matrix_cache:
-            return self._dense_matrix_cache[cache_key]
-
-        # Get sparse matrix and convert to dense
-        A_sparse = self._build_poisson_matrix(S, device, dtype)
-        A_dense = A_sparse.to_dense()
-        A_dense.requires_grad_(False)
-
-
-        # Matrix is built from constants, so naturally doesn't require gradients
-        # torch.linalg.solve will still compute gradients w.r.t. the right-hand side (input)
-
-        # Cache the dense matrix
-        self._dense_matrix_cache[cache_key] = A_dense
-
-        return A_dense
+    def _get_eigenvalues(self, M, device, dtype):
+        key = (M, device, dtype)
+        if key not in self._eigenvalue_cache:
+            k = torch.arange(1, M + 1, device=device, dtype=dtype)
+            eig1d = 2.0 * torch.cos(k * torch.pi / (M + 1)) - 2.0  # [M]
+            self._eigenvalue_cache[key] = eig1d[:, None] + eig1d[None, :]  # [M, M]
+        return self._eigenvalue_cache[key]
 
     def forward(self, x):
-        """
-        Args:
-            x: Tensor of shape [B, 1, H, W] where B is batch size, H=W is resolution
-               Represents the source term f(x,y)
-
-        Returns:
-            Tensor of shape [B, 1, H, W] representing the solution φ(x,y) = Δ^(-1) f
-        """
         if x.dim() != 4 or x.shape[1] != 1:
-            raise ValueError(f"Expected input shape [B, 1, H, W], got {x.shape}")
+            raise ValueError(f"Expected [B, 1, H, W], got {x.shape}")
+        B, _, S, _ = x.shape
+        M = S - 2  # interior grid size
+        h = 1.0 / (S - 1)
 
-        batch_size, channels, height, width = x.shape
-        if height != width:
-            raise ValueError(f"Expected square grid, got {height}x{width}")
+        f_int = x[:, 0, 1:-1, 1:-1]  # [B, M, M]
+        rhs = (h * h) * f_int
 
-        S = height
-        device = x.device
-        dtype = x.dtype
+        # Forward 2D DST-I
+        F = self._dst2_2d(rhs)  # [B, M, M]
 
-        # Get cached dense matrix for efficient batched solving
-        # For large grids, this uses more memory but allows batched GPU operations
-        A_dense = self._get_dense_matrix(S, device, dtype)  # [N, N]
+        # Divide by eigenvalues in spectral space
+        eig = self._get_eigenvalues(M, x.device, x.dtype)  # [M, M]
+        Phi_hat = F / eig  # [B, M, M]
 
-        # Reshape input: [B, 1, H, W] -> [B, H*W]
-        f_vec = x.view(batch_size, -1).clone()  # [B, N]
-        # Enforce homogeneous Dirichlet BC consistently in RHS.
-        # Boundary rows in A are identity rows (phi_boundary = 0), so RHS must be zero there.
-        x_bc = x[:, 0]
-        boundary_mask = torch.zeros((height, width), dtype=torch.bool, device=device)
-        boundary_mask[0, :] = True
-        boundary_mask[-1, :] = True
-        boundary_mask[:, 0] = True
-        boundary_mask[:, -1] = True
-        x_bc = x_bc.masked_fill(boundary_mask.unsqueeze(0), 0.0)
-        f_vec = x_bc.view(batch_size, -1)
+        # Inverse 2D DST-I: IDST2 = 4/(M+1)² · DST2
+        phi_int = self._dst2_2d(Phi_hat) * (4.0 / (M + 1) ** 2)  # [B, M, M]
 
-
-        # Batch solve: A_dense @ phi_vec = f_vec
-        # A_dense: [N, N], f_vec: [B, N] -> phi_vec: [B, N]
-        # Transpose f_vec to [N, B], solve, then transpose back
-        f_vec_t = f_vec.t()  # [N, B]
-        phi_vec_t = torch.linalg.solve(A_dense, f_vec_t)  # [N, B]
-        phi_vec = phi_vec_t.t()  # [B, N]
-
-        # Reshape: [B, N] -> [B, 1, H, W]
-        phi = phi_vec.view(batch_size, 1, height, width)
-
-        return phi
+        # Embed interior solution into full grid (boundary stays zero = Dirichlet BC)
+        phi = torch.zeros_like(x[:, 0])  # [B, S, S]
+        phi[:, 1:-1, 1:-1] = phi_int
+        return phi.unsqueeze(1)  # [B, 1, S, S]
 
 
 def compute_dynamic_langevin_steps(annealing_step, total_annealing_steps, base_langevin_steps, decay_type="exponential", decay_rate=0.5, min_steps=1):

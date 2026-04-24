@@ -46,4 +46,4 @@ dry_run: false  # Print training options and exit without training
 
 # Wandb configuration
 wandb: "online"  # Weights & Biases mode (options: online, offline, disabled)
-name: "poisson-forward"  # Wandb run name
+name: "poisson-one_channel"  # Wandb run name

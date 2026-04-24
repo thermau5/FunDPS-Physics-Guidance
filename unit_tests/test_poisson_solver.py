@@ -23,16 +23,18 @@ def get_wrapper():
 
 
 # ---------------------------------------------------------------------------
-# Test 1: A_dense has no gradient
+# Test 1: Eigenvalue cache has no gradient
 # ---------------------------------------------------------------------------
-def test_matrix_no_grad():
+def test_eigenvalue_no_grad():
     wrapper = get_wrapper()
-    S = 8
+    M = 6  # interior grid size for S=8
     device = torch.device("cpu")
     dtype = torch.float32
-    A = wrapper._get_dense_matrix(S, device, dtype)
-    assert not A.requires_grad, "A_dense should have requires_grad=False"
-    print("PASS test_matrix_no_grad")
+    eig = wrapper._get_eigenvalues(M, device, dtype)
+    assert not eig.requires_grad, "eigenvalue tensor should have requires_grad=False"
+    assert eig.shape == (M, M), f"Expected ({M},{M}), got {eig.shape}"
+    assert (eig < 0).all(), "All eigenvalues of discrete Laplacian should be negative"
+    print("PASS test_eigenvalue_no_grad")
 
 
 # ---------------------------------------------------------------------------
@@ -235,7 +237,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     print("Running Poisson solver tests...\n")
-    test_matrix_no_grad()
+    test_eigenvalue_no_grad()
     test_boundary_conditions()
     test_zero_source_gives_zero_solution()
     test_gradients_flow_to_input()
